@@ -1,0 +1,173 @@
+# ============================================================================
+# Robotina - dos agentes autonomos (Hermes gateway + OpenCode) sobre un
+# workspace compartido.
+#
+# Modelo de seguridad:
+#   1. Ningun agente tiene ruta directa a Internet: ambos viven solo en la red
+#      `agents` (internal: true), que no tiene gateway hacia afuera.
+#   2. La unica salida es `egress-proxy` (Squid), que solo acepta los dominios
+#      declarados en squid/allowlist.txt. Todo lo demas se deniega.
+#   3. Sin puertos publicados: nada entra desde el host ni desde la LAN.
+#   4. Contenedores sin capabilities, sin escalada de privilegios, con limites
+#      de CPU/memoria/PIDs, core dumps desactivados y logs acotados.
+#
+# Secretos: se interpolan desde un `.env` externo (nunca versionado; ver
+# .env.example). Riesgo residual asumido: las variables de entorno son legibles
+# con `docker inspect`. Materializarlas como archivos requiere envolver los
+# entrypoints de las imagenes.
+# ============================================================================
+
+# Baseline aplicado a los tres servicios.
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 512
+  ulimits:
+    core: 0
+  stop_grace_period: 20s
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+# Los agentes solo pueden salir por el proxy. Los clientes que ignoren estas
+# variables fracasan en vez de evadir el control de egreso.
+x-egress-env: &egress-env
+  HTTP_PROXY: http://egress-proxy:3128
+  HTTPS_PROXY: http://egress-proxy:3128
+  http_proxy: http://egress-proxy:3128
+  https_proxy: http://egress-proxy:3128
+  NO_PROXY: localhost,127.0.0.1,::1,hermes,opencode,egress-proxy
+  no_proxy: localhost,127.0.0.1,::1,hermes,opencode,egress-proxy
+
+services:
+  # --------------------------------------------------------------------------
+  # Unica puerta hacia Internet. Squid corre como usuario `proxy` (uid 13) con
+  # rootfs de solo lectura y sin capabilities: si lo comprometen, no puede
+  # dejar binarios en disco ni escalar privilegios.
+  # --------------------------------------------------------------------------
+  egress-proxy:
+    image: ubuntu/squid:latest
+    container_name: egress-proxy
+    restart: unless-stopped
+    # El CMD de la imagen ya apunta a /etc/squid/squid.conf.
+    user: "13:13" # usuario `proxy`: no necesita setuid ni capabilities
+    read_only: true
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    tmpfs:
+      # Squid escribe logs, cache y pid file: van a memoria, nunca al disco.
+      - /var/log/squid:rw,noexec,nosuid,nodev,size=16m,mode=0750,uid=13,gid=13
+      - /var/spool/squid:rw,noexec,nosuid,nodev,size=16m,mode=0750,uid=13,gid=13
+      - /run:rw,noexec,nosuid,nodev,size=1m,mode=0750,uid=13,gid=13
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    volumes:
+      # Politica y allowlist: solo lectura desde el contenedor.
+      - ./squid/squid.conf:/etc/squid/squid.conf:ro
+      - ./squid/allowlist.txt:/etc/squid/allowlist.txt:ro
+    networks:
+      # Lado agentes: recibe los pedidos.
+      - agents
+      # Unico contenedor con gateway hacia afuera.
+      - egress
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3128"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    <<: *hardening
+
+  # --------------------------------------------------------------------------
+  # Hermes gateway: bot de Telegram. Sin red de Internet propia.
+  # --------------------------------------------------------------------------
+  hermes:
+    image: nousresearch/hermes-agent:latest
+    container_name: hermes
+    restart: unless-stopped
+    init: true
+    command: ["gateway", "run"]
+    environment:
+      <<: *egress-env
+      TZ: America/Argentina/Buenos_Aires
+      # OpenCode Go
+      OPENCODE_GO_API_KEY: ${HERMES_OPENCODE_GO_API_KEY:?definir HERMES_OPENCODE_GO_API_KEY en .env}
+      # Telegram
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?definir TELEGRAM_BOT_TOKEN en .env}
+    volumes:
+      # Persistencia de Hermes:
+      # configuracion, sesiones, memoria, credenciales, logs, etc.
+      - hermes_data:/opt/data
+      # Workspace compartido con OpenCode
+      - workspace:/workspace
+    tmpfs:
+      # Escrituras temporales solo en memoria: no quedan residuos en el disco
+      # del host ni en la capa del contenedor.
+      - /tmp:rw,nosuid,nodev,size=256m,mode=1777
+    networks:
+      # Comunicacion Hermes <-> OpenCode <-> proxy. Sin salida directa.
+      - agents
+    mem_limit: 2g
+    cpus: 2.0
+    <<: *hardening
+    # Si la imagen no arranca por `cap_drop: [ALL]` (entrypoints que hacen
+    # chown/setuid), agregar solo lo imprescindible y volver a probar:
+    #   cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+
+  # --------------------------------------------------------------------------
+  # OpenCode: agente de codigo. Sin red de Internet propia.
+  # --------------------------------------------------------------------------
+  opencode:
+    image: ghcr.io/anomalyco/opencode:latest
+    container_name: opencode
+    restart: unless-stopped
+    init: true
+    working_dir: /workspace
+    environment:
+      <<: *egress-env
+      TZ: America/Argentina/Buenos_Aires
+      # OpenCode Go
+      OPENCODE_GO_API_KEY: ${OPENCODE_GO_API_KEY:?definir OPENCODE_GO_API_KEY en .env}
+      # Sin prompts interactivos de credenciales: falla rapido en lugar de
+      # quedarse esperando una respuesta que nunca va a llegar.
+      GIT_TERMINAL_PROMPT: "0"
+    volumes:
+      # Codigo/repositorios
+      - workspace:/workspace
+      # Configuracion/persistencia de OpenCode
+      - opencode_data:/root/.config/opencode
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m,mode=1777
+    networks:
+      # Comunicacion con Hermes y salida via proxy. Sin salida directa.
+      - agents
+    stdin_open: true
+    tty: true
+    mem_limit: 2g
+    cpus: 2.0
+    <<: *hardening
+    # Mismo caso que Hermes:
+    #   cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+
+volumes:
+  hermes_data:
+    name: hermes_data
+  opencode_data:
+    name: opencode_data
+  workspace:
+    name: agent_workspace
+
+networks:
+  # Red privada entre agentes y proxy.
+  # internal: true => sin gateway hacia Internet para nadie que este aca.
+  agents:
+    name: agents
+    internal: true
+  # Red con salida a Internet. La usa unicamente el proxy de egreso.
+  egress:
+    name: egress
+    driver: bridge

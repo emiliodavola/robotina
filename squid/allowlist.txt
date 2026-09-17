@@ -1,0 +1,25 @@
+# ============================================================================
+# Allowlist de egreso. Un dominio por linea; el punto inicial incluye el
+# dominio y todos sus subdominios.
+#
+# Todo lo que no este aca se deniega. Al agregar un destino preguntate si ese
+# servicio necesita ver el trafico de los agentes; si la respuesta es "no se",
+# no lo agregues.
+# ============================================================================
+
+# --- Telegram (Hermes gateway / Bot API, incluye descarga de archivos) -------
+.telegram.org
+
+# --- Proveedor de modelos de OpenCode Go ------------------------------------
+# TODO: descomentar y reemplazar por el host real del proveedor. Sin esto,
+# OpenCode no puede alcanzar su API a traves del proxy (falla cerrado).
+# .opencode.example
+
+# --- Repositorios y paquetes (git, npm, pip) --------------------------------
+# El punto inicial ya cubre el dominio y todos sus subdominios: no hace falta
+# listar api.github.com, codeload.github.com ni objects.githubusercontent.com.
+.github.com
+.githubusercontent.com
+.registry.npmjs.org
+.pypi.org
+.files.pythonhosted.org
