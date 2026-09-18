@@ -231,6 +231,65 @@ Nota de datos en reposo: cada llamada fallida deja un dump completo del request
 volumen. Si el agente va a manejar datos sensibles, conviene limpiarlos y
 decidir qué tier de modelo corresponde.
 
+## Interoperación Hermes <-> OpenCode
+
+Son **dos contenedores separados** que se hablan por **red**, no dos procesos en el
+mismo contenedor. Verificado:
+
+```text
+/hermes   ip=172.19.0.3 pid_host=69678
+/opencode ip=172.19.0.2 pid_host=69619
+hermes: command -v opencode -> NO EXISTE
+unico volumen compartido: /workspace
+```
+
+| Pieza | Cómo está |
+| --- | --- |
+| Servicio | `opencode serve --hostname 0.0.0.0 --port 4096` (headless, sin TUI ni TTY) |
+| Alcance | Solo la red `agents`. El puerto **no** se publica: no lo alcanza el host ni la LAN. |
+| Dirección del flujo | Hermes llama a `http://opencode:4096`. Al revés no hace falta. |
+| Credenciales | Ninguna por defecto. Con `OPENCODE_SERVER_PASSWORD` en `.env`, el servidor exige HTTP Basic (usuario `opencode`) y Hermes lo manda desde su entorno. |
+| Conocimiento | Skill `opencode-server` en `hermes/skills/`, montada **read-only**: el agente no puede reescribir sus propias instrucciones. |
+| Egreso | Sin cambios: opencode no tiene ruta propia. Su llamada al modelo aparece como `models.opencode.ai TCP_TUNNEL` en el log del proxy. |
+
+### Por qué conviene poner el password
+
+`egress-proxy` es el único otro miembro de la red `agents`. Si alguien compromete
+ese contenedor, sin password puede manejar a opencode — es decir, ejecutar código
+en `/workspace`. Es un salto de privilegio real, y se cierra con una línea:
+
+```ini
+# .env
+OPENCODE_SERVER_PASSWORD=<algo largo y random>
+```
+
+```bash
+docker compose up -d opencode hermes
+```
+
+Verificado: con el password puesto, `sin credencial -> 401`, `con credencial -> 200`,
+y la receta de la skill funciona sin cambios. Por defecto queda vacío, y el server
+avisa `server is unsecured` en su log: si ves ese warning, sabés que falta.
+
+### Trampa de red que te va a morder si no la sabés
+
+Las llamadas internas **deben usar el nombre de servicio** (`opencode`). Cualquier
+host interno que no esté en `NO_PROXY` sale por el proxy y el proxy lo deniega:
+síntoma `403` con una página HTML de Squid, que parece un problema de permisos de
+opencode y no lo es. Si algún día renombrás el servicio, actualizá `NO_PROXY`.
+
+### Modelos que opencode puede usar
+
+Solo tiene autenticado el tier **free** de `opencode/*` (`mimo-v2.5-free`,
+`nemotron-3-ultra-free`, `muse-spark-1.3-contributor-free`, …). Son gratis y
+suficientes para probar el circuito; para que use el plan Go hay que autenticarlo
+aparte (`opencode auth`, interactivo). El listado real está siempre en
+`GET http://opencode:4096/config/providers`.
+
+Nota: la skill que Hermes trae de fábrica (`opencode`) asume que el **CLI** está
+instalado en su propio contenedor: por eso el agente contestaba "no lo tengo
+instalado". La skill de este stack (`opencode-server`) es la que aplica.
+
 ## Puntos de atención
 
 - **Hermes intenta descubrir IPs de Telegram por DNS-over-HTTPS.** Al conectar
