@@ -56,5 +56,15 @@ if command -v engram >/dev/null 2>&1; then
   engram serve > /var/log/engram.log 2>&1 &
 fi
 
-# 4. El agente.
+# 4. Aviso accionable si el workspace compartido no es escribible.
+# Este contenedor corre con el uid de Hermes (10000) y el workspace es una
+# carpeta del host: si se recreó, queda root:root 755 y ninguno de los dos
+# agentes puede escribir. No se puede arreglar desde aca (haría falta root),
+# asi que se avisa fuerte en vez de fallar en silencio mas tarde.
+if [ ! -w /workspace ]; then
+  echo "AVISO: /workspace no es escribible por uid $(id -u)." >&2
+  echo "       En el host:  chmod 777 <HOST_DATA_DIR>/workspace  &&  docker compose up -d" >&2
+fi
+
+# 5. El agente.
 exec opencode "$@"

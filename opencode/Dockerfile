@@ -144,6 +144,22 @@ RUN mkdir -p /opt/gentle-ai-stage \
  && find /opt/gentle-ai-stage -maxdepth 4 -mindepth 1 -print \
  && echo "--- fin de artefactos ---"
 
+# --- permisos para correr como uid 10000 (el mismo que Hermes) ---------------
+# Los dos agentes comparten /workspace y, con `cap_drop: ALL`, un proceso sin
+# CAP_DAC_OVERRIDE no puede escribir archivos de otro uid. Medido: root crea
+# 0644 y el usuario hermes 0664, asi que NINGUNO podia editar lo del otro.
+# La imagen de Hermes no acepta HERMES_UID=0 (valida 1-65534), asi que se alinea
+# al reves: opencode corre con el uid de hermes (10000). /root necesita ser
+# atravesable por ese uid, y el cache (uv, go-build) tiene que ser suyo.
+# /root/.local/state/opencode YA EXISTE en la imagen vendor y es de root: un
+# `install -d` no le cambia el dueno, y opencode (uid 10000) necesita crear
+# /root/.local/state/opencode/locks ahi — los MCP remotos fallaban con EACCES.
+# Por eso el chown explicito y recursivo sobre /root, que ademas cubre cualquier
+# otro directorio que la imagen oficial traiga con dueno root.
+RUN chmod 0755 /root \
+ && install -d -o 10000 -g 10000 /root/.cache \
+ && chown -R 10000:10000 /root
+
 # --- configuracion propia (lo que NO gestiona gentle-ai) --------------------
 COPY overlay.json /opt/opencode-overlay.json
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

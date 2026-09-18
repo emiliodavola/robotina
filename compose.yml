@@ -117,6 +117,12 @@ services:
       # autenticar: solo lo alcanza quien este en la red `agents` (Hermes y el
       # proxy). Poniendo el mismo valor en .env, Hermes lo usa para hablarle.
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
+      # Los dos agentes comparten /workspace y, con `cap_drop: ALL`, un proceso
+      # sin CAP_DAC_OVERRIDE no puede escribir archivos de otro uid: con Hermes en
+      # 10000 y opencode como root, NINGUNO podia editar lo del otro (medido en
+      # las dos direcciones, "Permission denied"). La alineacion se hace del lado
+      # de opencode (`user: 10000`), porque esta imagen valida HERMES_UID entre 1
+      # y 65534 y DESCARTA 0 en silencio: no acepta correr su app como root.
     volumes:
       # Estado de Hermes en el host: configuracion, sesiones, memoria,
       # credenciales, logs.
@@ -170,6 +176,15 @@ services:
       context: ./opencode
     image: robotina-opencode:local
     container_name: opencode
+    # Los dos agentes comparten /workspace y, con `cap_drop: ALL`, un proceso sin
+    # CAP_DAC_OVERRIDE no puede escribir archivos de otro uid: root crea 0644 y el
+    # usuario `hermes` (uid 10000) 0664, asi que NINGUNO podia editar lo del otro
+    # (medido en las dos direcciones). La imagen de Hermes DESCARTA HERMES_UID=0 en
+    # silencio (valida 1-65534), asi que la alineacion se hace aca: opencode corre
+    # con el uid 10000.
+    # Requiere que las carpetas montadas y los volumenes sean de ese uid:
+    #   pwsh -File scripts/fix-permissions.ps1
+    user: "10000:10000"
     restart: unless-stopped
     init: true
     working_dir: /workspace
@@ -193,6 +208,8 @@ services:
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
       # Memoria de engram: viven en el host junto al resto del estado.
       ENGRAM_DATA_DIR: /root/.engram
+      # HOME explicito: corre como uid 10000 y /root es atravesable pero no suyo.
+      HOME: /root
     volumes:
       # Codigo/repositorios (el mismo del host que ve Hermes).
       - type: bind
