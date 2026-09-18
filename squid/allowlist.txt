@@ -27,6 +27,14 @@
 .pypi.org
 .files.pythonhosted.org
 
+# --- MCP remotos de opencode -------------------------------------------------
+# context7 (documentacion) y gh_grep (busqueda de codigo en GitHub) son los dos
+# MCP que el agente consulta por HTTP. Salen a un tercero: mandan la CONSULTA,
+# no el repo. Si preferis cerrarlos, comentá estas lineas y el agente va a
+# reportar 403 al usarlos.
+mcp.context7.com
+mcp.grep.app
+
 # --- Pedidos por Hermes y denegados a proposito ------------------------------
 # Observado con el proxy arriba: Hermes intenta estos tres al arrancar. Los 403
 # no le impiden funcionar (sigue con sus 58 skills ya incluidas y sin errores),

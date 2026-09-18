@@ -66,31 +66,38 @@ The reply also comes as event stream on `GET /event` (SSE) if you need progress.
 ## Authentication
 
 The server enforces HTTP Basic **only if** it was started with
-`OPENCODE_SERVER_PASSWORD`. Credentials are username `opencode` and that password as
-the password. Without the env var the endpoint is open (the server logs a warning).
+`OPENCODE_SERVER_PASSWORD`. Credentials are username `opencode` and that password
+as the password. Without the env var the endpoint is open (the server logs
+`server is unsecured`).
 
-Always build the credentials from the environment, optionally:
+Build the credentials as **positional parameters**, so the password survives any
+character it contains:
 
 ```sh
-AUTH=""
-[ -n "$OPENCODE_SERVER_PASSWORD" ] && AUTH="-u opencode:$OPENCODE_SERVER_PASSWORD"
-curl -s $AUTH http://opencode:4096/global/health
+set --
+[ -n "$OPENCODE_SERVER_PASSWORD" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"
+curl -s "$@" http://opencode:4096/global/health
 ```
+
+Do **not** do `AUTH="-u opencode:$OPENCODE_SERVER_PASSWORD"` and then `curl $AUTH`:
+the unquoted expansion splits a password with spaces or special characters into
+several arguments, curl receives garbage, and the API answers `401` as if the
+credential were wrong. That failure costs an hour if you don't know it.
 
 ## Recipe
 
 Send one task and read the answer:
 
 ```sh
-AUTH=""
-[ -n "$OPENCODE_SERVER_PASSWORD" ] && AUTH="-u opencode:$OPENCODE_SERVER_PASSWORD"
+set --
+[ -n "$OPENCODE_SERVER_PASSWORD" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"
 
-SID=$(curl -s $AUTH -X POST http://opencode:4096/session \
+SID=$(curl -s "$@" -X POST http://opencode:4096/session \
         -H 'Content-Type: application/json' \
         -d '{"title":"task from Hermes"}' \
       | sed -n 's/.*"id":"\(ses_[^"]*\)".*/\1/p')
 
-curl -s $AUTH -X POST "http://opencode:4096/session/$SID/message" \
+curl -s "$@" -X POST "http://opencode:4096/session/$SID/message" \
   -H 'Content-Type: application/json' \
   -d '{"model":{"providerID":"opencode","modelID":"mimo-v2.5-free"},
        "parts":[{"type":"text","text":"Add retry logic to the HTTP client and run the tests"}]}' \
@@ -119,6 +126,7 @@ you can, and it cannot reach the Internet except through the same allowlisted pr
 | Symptom | Cause |
 | --- | --- |
 | `Connection refused` | The opencode container is stopped or still starting. |
-| `401` | A password is set on the server; your request did not send the Basic credentials. |
+| `401` | A password is set on the server and the request did not send it — or it sent it with an unquoted `$AUTH` expansion. Use the `set --` pattern above. |
 | `403` with an HTML body mentioning Squid | The URL host is not in `NO_PROXY`, so the call went through the proxy and the allowlist denied it. Use the `opencode` service name. |
 | `Model ... is not supported` | Pick a `modelID` that `GET /config/providers` actually lists. |
+| `MCP error -32000: Connection closed` on an MCP server | That server's process died at startup. For local ones, run its command by hand inside the container to see the real error. |
