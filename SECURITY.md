@@ -188,6 +188,49 @@ el puerto en `0.0.0.0`: mapeá `127.0.0.1:9119:9119` únicamente. El dashboard
 tiene control total sobre el agente; publicarlo en la LAN o en Internet es
 regalarle el agente a quien alcance ese puerto.
 
+## Modelo y plan del proveedor
+
+El modelo default **no** vive en este repo: está en `/opt/data/config.yaml`,
+dentro del volumen `hermes_data`. `HERMES_MODEL` no alcanza para cambiarlo, por
+que la config del archivo tiene precedencia sobre la variable (ver
+`hermes_cli/config.py`: *a truthy configured model wins over HERMES_MODEL*).
+
+`OPENCODE_GO_API_KEY` resuelve al perfil `opencode-go`, cuyo relay sirve
+**únicamente modelos abiertos**. Un id que no esté en ese catálogo devuelve:
+
+```text
+HTTP 401: Model <id> is not supported
+provider=opencode-go base_url=https://opencode.ai/zen/go/v1
+```
+
+Hermes lo marca como no reintentable y no hay reintento que lo arregle: hay que
+cambiar el id. El catálogo real del plan se consulta en
+`https://opencode.ai/zen/go/v1/models` con `Authorization: Bearer
+$OPENCODE_GO_API_KEY` y, importante, con el **User-Agent de Hermes**
+(`HermesAgent/<version>`): sin ese UA, Cloudflare responde
+`403 error code: 1010` y parece un problema de credenciales cuando no lo es.
+
+Para cambiar de modelo (los ids son los del catálogo, sin prefijo):
+
+```bash
+# backup una sola vez
+cp -n /opt/data/config.yaml /opt/data/config.yaml.bak
+docker compose exec -T hermes \
+  sed -i 's|^  default: .*|  default: kimi-k2.7-code|' /opt/data/config.yaml
+docker compose restart hermes
+docker compose exec hermes hermes status   # debe mostrar Model y Provider
+```
+
+Dejá `provider:` explícito (`opencode-go`) en vez de `auto`: con `auto` el
+agente adivina entre proveedores logueados y los errores se vuelven
+indescifrables. Si el modelo elegido no contesta, mirá
+`docker compose exec hermes hermes logs errors`.
+
+Nota de datos en reposo: cada llamada fallida deja un dump completo del request
+(prompt + contexto) en `/opt/data/sessions/request_dump_*.json`, dentro del
+volumen. Si el agente va a manejar datos sensibles, conviene limpiarlos y
+decidir qué tier de modelo corresponde.
+
 ## Puntos de atención
 
 - **Hermes intenta descubrir IPs de Telegram por DNS-over-HTTPS.** Al conectar
