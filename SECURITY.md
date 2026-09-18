@@ -290,6 +290,50 @@ Nota: la skill que Hermes trae de fábrica (`opencode`) asume que el **CLI** est
 instalado en su propio contenedor: por eso el agente contestaba "no lo tengo
 instalado". La skill de este stack (`opencode-server`) es la que aplica.
 
+## Persistencia: qué vive dónde
+
+Todo el estado vive en carpetas del host bajo `HOST_DATA_DIR` (que se define en
+`.env`), **salvo dos bases SQLite** que van a volumenes nativos de Docker. No es
+capricho: es una medicion.
+
+| Dato | Donde | Por que |
+| --- | --- | --- |
+| Config y sesiones de Hermes | `${HOST_DATA_DIR}/hermes` | Carpeta del host: visible, editable, backupable. |
+| Workspace compartido | `${HOST_DATA_DIR}/workspace` | El mismo codigo que ven los dos agentes. |
+| Config de opencode (opencode.json, plugins, skills de gentle-ai, temas, `AGENTS.md`) | `${HOST_DATA_DIR}/opencode` | Idem. El entrypoint re-aplica ahi los artefactos de gentle-ai en cada arranque. |
+| Backups en JSON | `${HOST_DATA_DIR}/backups` | Salida de `scripts/export-state.sh`. |
+| `opencode.db` (sesiones) | volumen `robotina_opencode_db` | Usa **WAL**, y ver mas abajo. |
+| `engram.db` (memoria) | volumen `robotina_engram_db` | Usa **WAL**, idem. |
+| Logs del proxy | tmpfs | No persisten a proposito: no dejamos trafico ni credenciales en disco. |
+
+### Por que dos bases van a volumen y no al host
+
+SQLite en modo **WAL** sobre una carpeta de Windows (virtiofs/9p) puede
+corromperse en silencio: el WAL necesita memoria compartida y bloqueos que no son
+coherentes cruzando la frontera de la VM. Lo dice Hermes con todas las letras en
+su log (`cross-VM filesystem ... concurrent writers can silently corrupt the
+database`) y lo medimos leyendo el header de cada base (bytes 18-19: `1 1` =
+rollback, `2 2` = WAL):
+
+| Base | Modo medido | Se puede fijar en rollback? |
+| --- | --- | --- |
+| Las 6 bases de Hermes | `2 2` → **`1 1`** | **Si.** Hermes lo documenta: `database.journal_mode: delete` en `config.yaml` mas una conversion offline de cada base. Ya esta aplicado. |
+| `opencode.db` | `2 2` | **No**: al escribir vuelve a WAL. |
+| `engram.db` | `2 2` | **No**: idem (lo probamos convirtiendolo). |
+
+Por eso las dos que no se pueden fijar viven en volumen nativo, donde WAL es
+seguro, y el estado se saca al host en un formato que si es portable:
+
+```bash
+docker compose exec opencode sh /opt/export-state.sh
+# -> ${HOST_DATA_DIR}/backups/engram-<fecha>.json
+# -> ${HOST_DATA_DIR}/backups/opencode-<sesion>-<fecha>.json
+```
+
+Compromiso explicito: esas dos bases **no** se pueden abrir a mano desde el
+Explorador, y un reset de fabrica de Docker Desktop las borra. Los JSON si
+sobreviven, y `engram export` / `opencode export` permiten reconstruir.
+
 ## Puntos de atención
 
 - **Hermes intenta descubrir IPs de Telegram por DNS-over-HTTPS.** Al conectar
