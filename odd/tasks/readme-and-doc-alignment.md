@@ -82,7 +82,7 @@ Decisions taken with the user:
 - [x] T5 — GitHub description and topics.
 - [x] T6 — Independent verification: every factual claim in the new and edited docs
       re-checked against the real system by a second reader.
-- [ ] T7 — Work-unit commits, push, PR against `main`.
+- [x] T7 — Work-unit commits, push, PR against `main` → PR #1.
 
 ## Evidence
 
