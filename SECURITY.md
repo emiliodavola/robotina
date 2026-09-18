@@ -457,6 +457,48 @@ Hay que volver a correrlo si alguna de esas carpetas se recrea desde cero.
   contenedor no recibe el contenido horneado. Por eso el entrypoint re-aplica los
   artefactos de gentle-ai y el overlay en cada arranque.
 
+## Cómo le llega una instrucción al agente (y por qué la skill sola no alcanza)
+
+Medido en carne propia: se le pidió a Hermes clonar un repo privado y **pidió un token
+dos veces**, incluso con la política ya escrita en una skill y la caché regenerada.
+Causas, en orden de importancia:
+
+1. **De cada skill el modelo ve solo su `description`**, y después **decide** si abre el
+   cuerpo. Si el gancho no nombra su caso, la skill no se consulta. Por eso ahora cada
+   skill nuestra tiene una sola responsabilidad y un `description` que nombra su
+   disparador: `github-private-repos` dice "private repos, credentials, never ask the
+   user for a token".
+2. **El índice de skills está cacheado y la caché no vigila el directorio.** Lo dice el
+   código de la imagen (`prompt_builder.py`: *the skills index cache (LRU + disk
+   snapshot) does not watch the skills dir*). Se invalida comparando una firma de
+   archivos y se reescribe al construir un prompt — o sea con el mensaje siguiente, no
+   al reiniciar el contenedor. Y cada sesión guarda su propio system prompt, así que una
+   conversación vieja puede seguir viendo la lista vieja: para ver skills nuevas hace
+   falta **una conversación nueva**.
+3. **Lo que se carga siempre no es una skill**: es el archivo de contexto del `cwd`
+   (`.hermes.md`, prioridad máxima) y `SOUL.md`. Ahí va lo que el agente **no debe
+   deducir**: hechos del entorno y reglas duras.
+
+Implementación: `hermes/context/.hermes.md`, montado read-only en `/workspace/.hermes.md`,
+con el cwd de la terminal del agente apuntando ahí (`terminal.cwd: /workspace`). Efecto
+secundario deseable: el agente trabaja en el workspace compartido por defecto, que es lo
+que se esperaba de él (antes clonaba en `/opt/data` porque el workspace no era escribible).
+
+Verificado: con esos dos cambios, la misma pregunta que antes pedía un token ahora
+responde que no tiene credenciales *a propósito*, que delega en OpenCode y que **nunca**
+le pide un token al usuario.
+
+### Config que vive en tu carpeta, no en el repo
+
+Estos ajustes son estado tuyo (`HOST_DATA_DIR/hermes/config.yaml`), así que no viajan en
+el repo: si alguna vez regenerás la config con `hermes setup`, hay que volver a aplicarlos.
+
+| Ajuste | Por qué | Backup |
+| --- | --- | --- |
+| `database.journal_mode: delete` | WAL sobre carpeta de Windows puede corromperse | `config.yaml.bak-predelete` |
+| `terminal.cwd: /workspace` | para que el contexto del agente y su trabajo caigan en el workspace compartido | `config.yaml.bak-cwd` |
+| `model.default` + `provider: opencode-go` | el plan Go no sirve Claude | `config.yaml.bak` |
+
 ## Puntos de atención
 
 - **Hermes intenta descubrir IPs de Telegram por DNS-over-HTTPS.** Al conectar
