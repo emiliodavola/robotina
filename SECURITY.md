@@ -146,6 +146,11 @@ entrypoints de las imágenes vendorizadas, así que quedó fuera de alcance.
      egress-proxy -f /etc/squid/squid.conf -k parse
    ```
 
+   Corrélo desde PowerShell. En Git Bash/MSYS las rutas absolutas se reescriben
+   (aparece un `C:/Program Files/Git/usr/sbin/squid` que no existe, y parece una
+   política rota cuando en realidad es el shell) y hay que anteponer
+   `MSYS_NO_PATHCONV=1`.
+
 4. Para descubrir **qué** está rebotando, mirá el log del proxy: registra el
    dominio sin la URL.
 

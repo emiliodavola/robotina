@@ -175,10 +175,6 @@ Nothing gets out unless it is in `squid/allowlist.txt`. To enable a destination:
      egress-proxy -f /etc/squid/squid.conf -k parse
    ```
 
-   Run this from PowerShell. In Git Bash/MSYS the absolute paths get rewritten
-   (you will see a `C:/Program Files/Git/usr/sbin/squid` that does not exist) and
-   you have to prefix `MSYS_NO_PATHCONV=1`.
-
 4. If something is being refused, read the proxy log. It records the domain, not
    the URL:
 
