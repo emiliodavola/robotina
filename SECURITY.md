@@ -419,6 +419,44 @@ Para que `go get` / `go build` funcionen se agregaron a la allowlist
 alternativa —`GOSUMDB=off`— los evitaría a costa de perder la verificación de
 integridad de los módulos, que no vale la pena.
 
+## Workspace compartido: por qué opencode corre como uid 10000
+
+Los dos agentes escriben la misma carpeta, y con `cap_drop: ALL` un proceso sin
+`CAP_DAC_OVERRIDE` **no puede escribir archivos de otro uid**. Medido con los uid
+originales: root creaba `0644` y el usuario `hermes` `0664`, así que ninguno podía
+editar lo del otro — ni siquiera root, porque ya no tiene la capability que lo
+permitía. Síntoma indirecto: `git` respondía `detected dubious ownership`.
+
+La imagen de Hermes **no acepta** `HERMES_UID=0`: valida 1-65534 y descarta el 0 en
+silencio. Por eso la alineación se hace al revés: **opencode corre con el uid de
+Hermes (10000)**, y entonces todo archivo que crea cualquiera de los dos tiene el
+mismo dueño.
+
+Requiere que las carpetas montadas y los dos volúmenes pertenezcan a ese uid:
+
+```bash
+pwsh -File scripts/fix-permissions.ps1   # lee HOST_DATA_DIR del .env
+```
+
+Hay que volver a correrlo si alguna de esas carpetas se recrea desde cero.
+
+### Trampas que costaron tiempo, para no repetirlas
+
+- **`/root/.local/state/opencode` ya existe en la imagen oficial y es de root.**
+  `install -d` no le cambia el dueño a un directorio existente, así que opencode
+  (uid 10000) no podía crear su subdirectorio de locks y **los dos MCP remotos
+  fallaban** con `EACCES: mkdir '/root/.local/state/opencode/locks'`. Se resuelve
+  con `chown -R 10000:10000 /root` en el Dockerfile, que además cubre cualquier
+  otro directorio que la imagen vendor traiga con dueño root.
+- **Cambiar el Dockerfile no recrea el contenedor.** `docker compose up -d` compara
+  la configuración declarada, no el contenido de la imagen, así que el contenedor
+  sigue con la imagen vieja y el cambio "no tiene efecto". Después de un build:
+  `docker compose up -d --force-recreate opencode`.
+- **Los binds de Windows no siembran desde la imagen.** A diferencia de un volumen
+  nombrado, un bind muestra la carpeta del host tal cual: si está vacía, el
+  contenedor no recibe el contenido horneado. Por eso el entrypoint re-aplica los
+  artefactos de gentle-ai y el overlay en cada arranque.
+
 ## Puntos de atención
 
 - **Hermes intenta descubrir IPs de Telegram por DNS-over-HTTPS.** Al conectar
