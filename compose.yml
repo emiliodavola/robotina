@@ -15,6 +15,13 @@
 # .env.example). Riesgo residual asumido: las variables de entorno son legibles
 # con `docker inspect`. Materializarlas como archivos requiere envolver los
 # entrypoints de las imagenes.
+#
+# Persistencia: TODO el estado (config de los agentes, memoria de engram, el
+# workspace) vive en carpetas del host bajo HOST_DATA_DIR, no en volumenes
+# nombrados de Docker. Son visibles, editables y respaldables como cualquier
+# proyecto, y sobreviven a un reset de Docker Desktop. HOST_DATA_DIR se define
+# en `.env` y es obligatorio: si falta, el stack no arranca, para que el estado
+# nunca termine escondido adentro del repo.
 # ============================================================================
 
 # Baseline aplicado a los tres servicios.
@@ -111,15 +118,22 @@ services:
       # proxy). Poniendo el mismo valor en .env, Hermes lo usa para hablarle.
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
     volumes:
-      # Persistencia de Hermes:
-      # configuracion, sesiones, memoria, credenciales, logs, etc.
-      - hermes_data:/opt/data
-      # Workspace compartido con OpenCode
-      - workspace:/workspace
+      # Estado de Hermes en el host: configuracion, sesiones, memoria,
+      # credenciales, logs.
+      - type: bind
+        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/hermes
+        target: /opt/data
+      # Workspace compartido con OpenCode, tambien en el host.
+      - type: bind
+        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/workspace
+        target: /workspace
       # Skill propia del stack: le ensena a Hermes que OpenCode es un servidor
       # remoto por HTTP, no un CLI dentro de este contenedor. Read-only: el
       # agente no puede reescribir sus propias instrucciones.
-      - ./hermes/skills/opencode-server:/opt/data/skills/autonomous-ai-agents/opencode-server:ro
+      - type: bind
+        source: ./hermes/skills/opencode-server
+        target: /opt/data/skills/autonomous-ai-agents/opencode-server
+        read_only: true
     tmpfs:
       # Escrituras temporales solo en memoria: no quedan residuos en el disco
       # del host ni en la capa del contenedor.
@@ -146,9 +160,15 @@ services:
   # Corre como servidor HTTP (`serve`) en la red `agents`: asi Hermes puede
   # despacharle trabajo sin que los dos compartan contenedor. El puerto NO se
   # publica, asi que solo lo alcanza quien esta en esta red interna.
+  #
+  # La imagen es derivada (opencode/Dockerfile): la oficial es Alpine pelado y
+  # no trae node, npm, python, git, los LSP ni gentle-ai. Los artefactos de
+  # gentle-ai los genera SU instalador en el build; nada se copia a mano.
   # --------------------------------------------------------------------------
   opencode:
-    image: ghcr.io/anomalyco/opencode:latest
+    build:
+      context: ./opencode
+    image: robotina-opencode:local
     container_name: opencode
     restart: unless-stopped
     init: true
@@ -164,11 +184,41 @@ services:
       GIT_TERMINAL_PROMPT: "0"
       # Password que exige el servidor de OpenCode (mismo valor que en hermes).
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
+      # Memoria de engram: viven en el host junto al resto del estado.
+      ENGRAM_DATA_DIR: /root/.engram
     volumes:
-      # Codigo/repositorios
-      - workspace:/workspace
-      # Configuracion/persistencia de OpenCode
-      - opencode_data:/root/.config/opencode
+      # Codigo/repositorios (el mismo del host que ve Hermes).
+      - type: bind
+        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/workspace
+        target: /workspace
+      # Config de opencode: plugins que instala el runtime, package-lock y los
+      # artefactos que el entrypoint aplica en cada arranque.
+      - type: bind
+        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/opencode
+        target: /root/.config/opencode
+      # Cerebro de engram (SQLite en modo WAL). Volumen NATIVO, no carpeta del
+      # host: WAL sobre virtiofs/9p (carpetas de Windows) puede corromperse en
+      # silencio — es lo que Hermes denuncia y lo que medimos: engram re-activa
+      # WAL al escribir, no hay forma de fijarlo en rollback. El estado se saca
+      # al host en JSON con scripts/export-state.sh.
+      - type: volume
+        source: engram_db
+        target: /root/.engram
+      # Sesiones y base propia de opencode (opencode.db), mismo motivo: opencode
+      # fuerza WAL. Sin este volumen el historial vive en la capa del contenedor
+      # y se pierde en cada recreate.
+      - type: volume
+        source: opencode_db
+        target: /root/.local/share/opencode
+      # Salida de scripts/export-state.sh: JSON legible y portable, en el host.
+      - type: bind
+        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/backups
+        target: /backups
+      # El script de export, versionado en el repo y de solo lectura.
+      - type: bind
+        source: ./scripts/export-state.sh
+        target: /opt/export-state.sh
+        read_only: true
     tmpfs:
       # `exec` obligatorio: OpenTUI extrae una .so a /tmp y la carga con dlopen;
       # sobre un tmpfs noexec eso falla con EPERM y el contenedor entra en
@@ -179,17 +229,19 @@ services:
     networks:
       # Comunicacion con Hermes y salida via proxy. Sin salida directa.
       - agents
-    mem_limit: 2g
-    cpus: 2.0
+    mem_limit: 4g
+    cpus: 4.0
     <<: *hardening
 
+# Bases SQLite en modo WAL: en volumenes NATIVOS, porque WAL sobre una carpeta
+# de Windows puede corromperse en silencio. El resto del estado (config de los
+# agentes, plugins, skills, el workspace y TODO lo de Hermes) vive en carpetas
+# del host. Para sacar estas dos bases al host: scripts/export-state.sh.
 volumes:
-  hermes_data:
-    name: hermes_data
-  opencode_data:
-    name: opencode_data
-  workspace:
-    name: agent_workspace
+  opencode_db:
+    name: robotina_opencode_db
+  engram_db:
+    name: robotina_engram_db
 
 networks:
   # Red privada entre agentes y proxy.
