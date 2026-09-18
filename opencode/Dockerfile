@@ -29,11 +29,35 @@ SHELL ["/bin/sh", "-o", "pipefail", "-c"]
 # --- runtimes y herramientas del agente --------------------------------------
 # R viene con las toolchain porque languageserver se compila al instalarse.
 RUN apk add --no-cache \
-      bash curl git jq nodejs npm python3 py3-pip ripgrep tar xz \
+      bash curl git jq nodejs npm uv ripgrep tar xz \
       tzdata ca-certificates \
       R R-dev gcc g++ make gfortran libxml2-dev openssl-dev zlib-dev \
       linux-headers \
+      go \
  && rm -rf /var/cache/apk/*
+
+# --- Python: uv como unico gestor, con su propio interprete --------------------
+# No se instala el paquete python3 de Alpine: uv baja y administra el interprete
+# (su resolver e instalador son mucho mas rapidos) y el build lo deja ya
+# instalado, para que no dependa de la red en runtime.
+#
+# UV_* apuntan a /root/.local/share/uv, que compose monta sobre la carpeta del
+# host: interpretes, entornos y herramientas sobreviven a los recreates.
+# `python3` se expone por compatibilidad — cualquier script o skill que espere
+# python3 en el PATH sigue funcionando, y borrar el symlink es una linea si
+# preferis que solo exista `uv run`.
+ENV UV_PYTHON_INSTALL_DIR=/root/.local/share/uv/python \
+    UV_TOOL_DIR=/root/.local/share/uv/tools \
+    UV_TOOL_BIN_DIR=/root/.local/share/uv/bin \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_PREFERENCE=only-managed \
+    PATH=/root/.local/share/uv/bin:$PATH
+RUN uv python install 3.13 \
+ && ln -sf "$(uv python find 3.13)" /usr/local/bin/python3 \
+ && ln -sf /usr/local/bin/python3 /usr/local/bin/python \
+ && uv --version \
+ && python3 --version \
+ && uv python list --only-installed
 
 # --- LSP: json, dockerfile y python (versiones iguales a las del host) -------
 RUN npm install -g --no-fund --no-audit --loglevel=error \

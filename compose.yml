@@ -226,6 +226,12 @@ services:
       - type: bind
         source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/git
         target: /root/.config/git
+      # GOPATH (cache de modulos y binarios de `go install`). Es cache: en la
+      # imagen no hay nada en esta ruta, asi que el mount no tapa nada y evita
+      # volver a bajar los modulos en cada recreate.
+      - type: bind
+        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/go
+        target: /root/go
       # El script de export, versionado en el repo y de solo lectura.
       - type: bind
         source: ./scripts/export-state.sh

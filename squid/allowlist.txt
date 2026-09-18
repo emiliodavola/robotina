@@ -35,6 +35,14 @@
 mcp.context7.com
 mcp.grep.app
 
+# --- Modulos de Go -----------------------------------------------------------
+# GOPROXY (proxy.golang.org) y la base de checksums (sum.golang.org). Sin estos
+# dos, `go get` / `go build` con dependencias externas fallan. La alternativa
+# —`GOSUMDB=off`— los evita a costa de perder la verificacion de integridad de
+# los modulos.
+proxy.golang.org
+sum.golang.org
+
 # --- Pedidos por Hermes y denegados a proposito ------------------------------
 # Observado con el proxy arriba: Hermes intenta estos tres al arrancar. Los 403
 # no le impiden funcionar (sigue con sus 58 skills ya incluidas y sin errores),

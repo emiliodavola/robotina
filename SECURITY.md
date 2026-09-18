@@ -336,9 +336,9 @@ sobreviven, y `engram export` / `opencode export` permiten reconstruir.
 
 ## Autenticación de GitHub en el contenedor de opencode
 
-Herramientas disponibles: `git` 2.54.0, `gh` 2.97.0, `curl`, `node`, `npm`,
-`python3`, `jq`. **No** hay cliente `ssh`, y no es un olvido: el proxy solo
-permite `CONNECT` al puerto 443, así que SSH por el 22 es imposible. Las URLs
+Herramientas disponibles: `git` 2.54.0, `gh` 2.97.0, `curl`, `node`, `npm`, `go`
+1.26.8, `uv` 0.11.19, `jq`. **No** hay cliente `ssh`, y no es un olvido: el proxy
+solo permite `CONNECT` al puerto 443, así que SSH por el 22 es imposible. Las URLs
 `git@github.com:` se reescriben a HTTPS con `insteadOf`, en la config de SISTEMA
 (`/etc/gitconfig`), así que cualquier receta que use la forma SSH funciona igual:
 
@@ -373,6 +373,51 @@ Verificado con un token dummy: `git credential fill` para `github.com` devuelve
   `${HOST_DATA_DIR}/git/config` vía `GIT_CONFIG_GLOBAL`, así que sobrevive a los
   recreates. Verificado escribiendo desde el contenedor y leyendo el archivo en
   el host.
+
+## Python y Go dentro del contenedor
+
+### Python: solo `uv`, sin `python3` de Alpine
+
+No se instala el paquete `python3` de Alpine. `uv` administra su propio
+intérprete (**CPython 3.13.13**, horneado en la imagen durante el build, así que
+no depende de la red en runtime) y `python3`/`python` son symlinks a él para que
+cualquier script que espere `python3` en el PATH siga funcionando.
+
+El flujo correcto es por entorno virtual, **en el proyecto**:
+
+```bash
+cd /workspace/mi-proyecto
+uv venv            # crea .venv
+uv pip install requests
+uv run script.py
+```
+
+Eso además cumple la regla de persistencia: el `.venv` queda dentro del
+workspace, que está montado en la carpeta del host. Verificado: instalar `six`
+por el proxy tarda 139 ms y el `.venv` aparece en el host.
+
+Dos cosas que conviene saber porque **no** son errores:
+
+- `uv pip install --system` **se niega**: *"This Python installation is managed by
+  uv and should not be modified"*. uv protege su intérprete a propósito; instalá
+  en un venv.
+- `uv tool install <cli>` escribe en la capa de la imagen y se pierde al recrear
+  el contenedor. Para una herramienta que quieras fija, agregala al Dockerfile;
+  para uso puntual, `uvx <cli>`.
+
+Puertos de salida usados y permitidos: `pypi.org` y `files.pythonhosted.org`
+(verificado instalando `six`).
+
+### Go
+
+`go` 1.26.8, con `GOPATH=/root/go` montado en `${HOST_DATA_DIR}/go`: el cache de
+módulos y los binarios de `go install` sobreviven a los recreates y los ves en el
+host. Verificado bajando un módulo real.
+
+Para que `go get` / `go build` funcionen se agregaron a la allowlist
+`proxy.golang.org` (GOPROXY) y `sum.golang.org` (base de checksums). La
+alternativa —`GOSUMDB=off`— los evitaría a costa de perder la verificación de
+integridad de los módulos, que no vale la pena.
 
 ## Puntos de atención
 
