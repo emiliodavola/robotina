@@ -100,6 +100,12 @@ services:
       OPENCODE_GO_API_KEY: ${HERMES_OPENCODE_GO_API_KEY:?definir HERMES_OPENCODE_GO_API_KEY en .env}
       # Telegram
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?definir TELEGRAM_BOT_TOKEN en .env}
+      # Quien puede hablarle al bot. Vacio (default) = fail closed: Hermes manda
+      # un codigo de pairing a los DM desconocidos y los rechaza hasta que se
+      # aprueben. Para autorizarte sin abrir el dashboard, pon tu ID numerico
+      # de Telegram (te lo da @userinfobot) en .env:
+      #   TELEGRAM_ALLOWED_USERS=123456789
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
     volumes:
       # Persistencia de Hermes:
       # configuracion, sesiones, memoria, credenciales, logs, etc.
@@ -109,7 +115,9 @@ services:
     tmpfs:
       # Escrituras temporales solo en memoria: no quedan residuos en el disco
       # del host ni en la capa del contenedor.
-      - /tmp:rw,nosuid,nodev,size=256m,mode=1777
+      # `exec` es obligatorio: Docker agrega noexec a todo tmpfs salvo que lo
+      # pidas explicito (medido con /proc/mounts).
+      - /tmp:rw,exec,nosuid,nodev,size=256m,mode=1777
     networks:
       # Comunicacion Hermes <-> OpenCode <-> proxy. Sin salida directa.
       - agents
@@ -147,7 +155,12 @@ services:
       # Configuracion/persistencia de OpenCode
       - opencode_data:/root/.config/opencode
     tmpfs:
-      - /tmp:rw,nosuid,nodev,size=256m,mode=1777
+      # `exec` obligatorio: OpenTUI extrae una .so a /tmp y la carga con dlopen;
+      # sobre un tmpfs noexec eso falla con EPERM y el contenedor entra en
+      # crash loop ("Error loading shared library /tmp/....so: Operation not
+      # permitted"). El agente ya ejecuta codigo arbitrario por diseno, asi que
+      # noexec aca no aporta seguridad real.
+      - /tmp:rw,exec,nosuid,nodev,size=256m,mode=1777
     networks:
       # Comunicacion con Hermes y salida via proxy. Sin salida directa.
       - agents

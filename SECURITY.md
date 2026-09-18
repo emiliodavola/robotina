@@ -163,8 +163,38 @@ docker run --rm --network agents curlimages/curl \
 #    403
 ```
 
+## Puesta en marcha: quién puede hablarle al agente
+
+El bot escucha por polling, así que el control de acceso **no** es la red: es
+la allowlist de usuarios. Con `TELEGRAM_ALLOWED_USERS` vacío, Hermes le manda un
+**código de pairing** a cualquier DM desconocido y lo rechaza hasta aprobarlo.
+Ese aprobado se hace normalmente desde el dashboard (puerto 9119) —que acá
+**no está publicado a propósito**— así que el camino sin fricción es declararlo
+de antemano:
+
+1. Pedile tu ID numérico a `@userinfobot` en Telegram (desde tu cliente, no
+desde el contenedor).
+2. Agregá a `.env`: `TELEGRAM_ALLOWED_USERS=123456789` (varios, separados por
+   coma).
+3. `docker compose up -d hermes`
+
+Para comprobar cómo quedó el agente: `docker compose exec hermes hermes status`.
+El proveedor de modelos debe aparecer resuelto (con `OPENCODE_GO_API_KEY`
+resuelve a `OpenCode Go`, base `https://opencode.ai/zen/go/v1`, ya permitida por
+la allowlist).
+
+Si en algún momento querés aprobar pairings desde el dashboard, **no** publiques
+el puerto en `0.0.0.0`: mapeá `127.0.0.1:9119:9119` únicamente. El dashboard
+tiene control total sobre el agente; publicarlo en la LAN o en Internet es
+regalarle el agente a quien alcance ese puerto.
+
 ## Puntos de atención
 
+- **Hermes intenta descubrir IPs de Telegram por DNS-over-HTTPS.** Al conectar
+  pide `dns.google` y `cloudflare-dns.com`; el proxy los deniega y la conexión
+  igual se establece contra `api.telegram.org`. Dejalo bloqueado: habilitar esos
+  dos hosts reabre un canal de DNS paralelo que esquiva la allowlist por
+  dominio.
 - **Un cliente que ignore `HTTP(S)_PROXY` falla, no evade.** Si resuelve el
   nombre por su cuenta y abre un socket directo, se choca con que la red
   `agents` no tiene ruta ni DNS externo. Para Hermes eso quedó descartado por
