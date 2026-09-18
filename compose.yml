@@ -182,6 +182,13 @@ services:
       # Sin prompts interactivos de credenciales: falla rapido en lugar de
       # quedarse esperando una respuesta que nunca va a llegar.
       GIT_TERMINAL_PROMPT: "0"
+      # Token de GitHub. gh y el credential helper de git lo leen de aca, sin
+      # `gh auth login`. Riesgo asumido (elegido por el usuario): es legible con
+      # `docker inspect`, a cambio de no tener un archivo de credenciales extra.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # La config GLOBAL de git (identidad de commits, preferencias) apunta a la
+      # carpeta del host, para que no se pierda en cada recreate.
+      GIT_CONFIG_GLOBAL: /root/.config/git/config
       # Password que exige el servidor de OpenCode (mismo valor que en hermes).
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
       # Memoria de engram: viven en el host junto al resto del estado.
@@ -214,6 +221,11 @@ services:
       - type: bind
         source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/backups
         target: /backups
+      # Config global de git en el host (GIT_CONFIG_GLOBAL apunta aca): identidad
+      # de commits y preferencias que sobreviven a los recreates.
+      - type: bind
+        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/git
+        target: /root/.config/git
       # El script de export, versionado en el repo y de solo lectura.
       - type: bind
         source: ./scripts/export-state.sh

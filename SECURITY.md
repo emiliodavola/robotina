@@ -334,6 +334,46 @@ Compromiso explicito: esas dos bases **no** se pueden abrir a mano desde el
 Explorador, y un reset de fabrica de Docker Desktop las borra. Los JSON si
 sobreviven, y `engram export` / `opencode export` permiten reconstruir.
 
+## Autenticación de GitHub en el contenedor de opencode
+
+Herramientas disponibles: `git` 2.54.0, `gh` 2.97.0, `curl`, `node`, `npm`,
+`python3`, `jq`. **No** hay cliente `ssh`, y no es un olvido: el proxy solo
+permite `CONNECT` al puerto 443, así que SSH por el 22 es imposible. Las URLs
+`git@github.com:` se reescriben a HTTPS con `insteadOf`, en la config de SISTEMA
+(`/etc/gitconfig`), así que cualquier receta que use la forma SSH funciona igual:
+
+```bash
+# verificado: devuelve el hash aunque la URL sea ssh
+git ls-remote git@github.com:artempyanykh/marksman HEAD
+```
+
+El token va por entorno y `gh` actúa de credential helper de git. Sin
+`gh auth login`:
+
+```ini
+# .env
+GITHUB_TOKEN=<pat fine-grained>
+```
+
+Verificado con un token dummy: `git credential fill` para `github.com` devuelve
+`username=x-access-token` y el password tomado del entorno.
+
+### Límites y riesgos (medidos, no supuestos)
+
+- **`gh auth token` imprime el token.** Cualquier proceso del contenedor,
+  incluido el agente, lo lee con un comando. El deny-list de `permission.read`
+  protege de la lectura accidental de archivos (`**/.env`, `**/.ssh/**`,
+  `**/.config/gh/hosts.yml`), no de un agente decidido: si le pedís que te lo
+  muestre, te lo muestra.
+- Por eso: **PAT fine-grained**, con los repos justos y el alcance mínimo
+  (Contents read/write; Pull requests solo si lo necesitás).
+- La variable es legible con `docker inspect`: el mismo riesgo ya aceptado para
+  el resto de las claves.
+- La config GLOBAL de git (identidad de commits, preferencias) vive en
+  `${HOST_DATA_DIR}/git/config` vía `GIT_CONFIG_GLOBAL`, así que sobrevive a los
+  recreates. Verificado escribiendo desde el contenedor y leyendo el archivo en
+  el host.
+
 ## Puntos de atención
 
 - **Hermes intenta descubrir IPs de Telegram por DNS-over-HTTPS.** Al conectar

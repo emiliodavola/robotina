@@ -62,7 +62,18 @@ RUN apk add --no-cache libuv-dev icu-dev curl-dev pkgconf \
 RUN R -q -e 'install.packages("languageserver", repos="https://cloud.r-project.org", Ncpus=4)' \
  && R -q -e 'stopifnot(requireNamespace("languageserver", quietly=TRUE))'
 
-# --- MCP local del usuario: codegraph ---------------------------------------
+# --- herramientas de desarrollo ------------------------------------------------
+# gh: ademas de CLI, es el credential helper de git para HTTPS. Con
+# GITHUB_TOKEN en el entorno, gh lo toma sin necesidad de `gh auth login`.
+RUN apk add --no-cache github-cli && gh --version
+
+# Config de SISTEMA de git (programa, no estado): el helper de credenciales lee
+# el token del entorno via gh, y las URLs SSH se reescriben a HTTPS porque el
+# proxy de egreso solo permite CONNECT al puerto 443 — SSH por 22 es imposible
+# aca. El archivo de config GLOBAL (identidad, preferencias) vive en el host,
+# apuntado por GIT_CONFIG_GLOBAL desde compose.
+RUN printf '[credential "https://github.com"]\n\thelper = !gh auth git-credential\n[url "https://github.com/"]\n\tinsteadOf = git@github.com:\n[init]\n\tdefaultBranch = main\n' > /etc/gitconfig \
+ && git config --system --get-regexp 'credential|url|init'
 # codegraph-linux-x64 empaqueta su propio runtime `node`, compilado contra
 # glibc: en Alpine (musl) su loader no existe, el MCP muere con "MCP error
 # -32000: Connection closed" y el wrapper reporta "node: not found" (el sintoma
