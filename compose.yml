@@ -133,12 +133,21 @@ services:
       - type: bind
         source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/workspace
         target: /workspace
-      # Skill propia del stack: le ensena a Hermes que OpenCode es un servidor
-      # remoto por HTTP, no un CLI dentro de este contenedor. Read-only: el
-      # agente no puede reescribir sus propias instrucciones.
+      # Skills propias del stack, agrupadas en su propia categoria. Read-only:
+      # el agente no puede reescribir sus propias instrucciones. Una sola montura
+      # para todas, asi sumar una skill no obliga a tocar compose.
       - type: bind
-        source: ./hermes/skills/opencode-server
-        target: /opt/data/skills/autonomous-ai-agents/opencode-server
+        source: ./hermes/skills
+        target: /opt/data/skills/stack
+        read_only: true
+      # Hechos del entorno + la regla de credenciales, en el archivo de contexto de
+      # MAYOR prioridad que Hermes busca desde su cwd. Como el cwd de la terminal es
+      # /workspace (config terminal.cwd), esto entra en TODOS los prompts, sin
+      # depender de que el modelo decida abrir una skill. Read-only: el agente no
+      # reescribe sus propias instrucciones.
+      - type: bind
+        source: ./hermes/context/.hermes.md
+        target: /workspace/.hermes.md
         read_only: true
     tmpfs:
       # Escrituras temporales solo en memoria: no quedan residuos en el disco
