@@ -8,12 +8,15 @@
 # ============================================================================
 
 # --- Telegram (Hermes gateway / Bot API, incluye descarga de archivos) -------
+# Verificado: la imagen trae python-telegram-bot 22.8 (Bot API sobre HTTPS),
+# que pasa proxy=None a httpx y por lo tanto honra HTTPS_PROXY.
 .telegram.org
 
-# --- Proveedor de modelos de OpenCode Go ------------------------------------
-# TODO: descomentar y reemplazar por el host real del proveedor. Sin esto,
-# OpenCode no puede alcanzar su API a traves del proxy (falla cerrado).
-# .opencode.example
+# --- Proveedor de modelos (OpenCode Go / Zen) --------------------------------
+# Verificado en la imagen: el relay es opencode.ai
+# (agent/anthropic_endpoints.py, agent/model_metadata.py:
+# "opencode.ai": "opencode-go"). Cubre api.opencode.ai si lo usa.
+.opencode.ai
 
 # --- Repositorios y paquetes (git, npm, pip) --------------------------------
 # El punto inicial ya cubre el dominio y todos sus subdominios: no hace falta
@@ -23,3 +26,13 @@
 .registry.npmjs.org
 .pypi.org
 .files.pythonhosted.org
+
+# --- Pedidos por Hermes y denegados a proposito ------------------------------
+# Observado con el proxy arriba: Hermes intenta estos tres al arrancar. Los 403
+# no le impiden funcionar (sigue con sus 58 skills ya incluidas y sin errores),
+# asi que quedan cerrados hasta que decidas lo contrario. Descomentar solo si
+# los necesitas:
+#
+# openrouter.ai                 # catalogo de modelos, si tu config apunta ahi
+# portal.nousresearch.com       # portal de Nous (auth / creditos)
+# hermes-agent.nousresearch.com # canal de update / docs de Hermes
