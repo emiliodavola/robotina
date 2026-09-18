@@ -89,7 +89,9 @@ services:
     image: nousresearch/hermes-agent:latest
     container_name: hermes
     restart: unless-stopped
-    init: true
+    # Sin `init: true`: Hermes corre s6-overlay y exige ser PID 1. Con el init de
+    # Docker como PID 1 el entrypoint degrada ("skipping s6-overlay /init...
+    # Supervised services are unavailable") y no levantaria sus servicios.
     command: ["gateway", "run"]
     environment:
       <<: *egress-env
@@ -114,9 +116,13 @@ services:
     mem_limit: 2g
     cpus: 2.0
     <<: *hardening
-    # Si la imagen no arranca por `cap_drop: [ALL]` (entrypoints que hacen
-    # chown/setuid), agregar solo lo imprescindible y volver a probar:
-    #   cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    # s6-overlay baja privilegios con `s6-setuidgid hermes` (initgroups →
+    # SETUID/SETGID) y ajusta el dueno del volumen (CHOWN/DAC_OVERRIDE/FOWNER).
+    # Con `cap_drop: [ALL]` el arranque muere con:
+    #   s6-applyuidgid: fatal: unable to set supplementary group list: Operation not permitted
+    # No usar `user:`: la imagen rechaza un UID arbitrario; para mapear al UID
+    # del host van HERMES_UID / HERMES_GID manteniendo root en el arranque.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
 
   # --------------------------------------------------------------------------
   # OpenCode: agente de codigo. Sin red de Internet propia.
@@ -150,8 +156,6 @@ services:
     mem_limit: 2g
     cpus: 2.0
     <<: *hardening
-    # Mismo caso que Hermes:
-    #   cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
 
 volumes:
   hermes_data:
