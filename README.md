@@ -213,10 +213,11 @@ Medido dentro de los contenedores que corren, no copiado de la documentación.
 | LSPs | marksman 2026-02-08, basedpyright 1.39.9, vscode-langservers 4.10.0, dockerfile-language-server 0.15.0, taplo y R `languageserver` | npm / `apk` / R |
 
 `opencode/Dockerfile` pinea engram, gentle-ai, marksman y los paquetes npm, y
-verifica los binarios por checksum. Todo lo demás se resuelve al construir (tags
-`latest` y `apk` sin versión), así que **estas versiones describen la imagen
-medida, no una garantía a futuro**: para auditar una versión concreta hay que
-volver a medirla en el contenedor.
+**solo verifica por checksum las descargas de engram y gentle-ai**: marksman va
+por tag de release, sin verificación de integridad. Todo lo demás se resuelve al
+construir (tags `latest` y `apk` sin versión), así que **estas versiones
+describen la imagen medida, no una garantía a futuro**: para auditar una versión
+concreta hay que volver a medirla en el contenedor.
 
 ## Modelo de seguridad, en cinco líneas
 

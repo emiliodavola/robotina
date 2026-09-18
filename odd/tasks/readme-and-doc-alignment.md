@@ -140,6 +140,13 @@ by a movable release tag with no integrity check.
 
 ## Gotchas found
 
+- **Two writers landed on the branch mid-feature.** Two commits from the human
+  editor arrived while this work was in flight; one of them rewrote this README's
+  checksum sentence back to the exact claim the verifier had just falsified, and
+  dropped the Git Bash path-mangling note, while the English mirror kept both. The
+  bilingual pair desynchronized on a **fact** — the failure mode a two-language
+  doc invites by construction. Either every measured claim lives in one document
+  and the other links to it, or the two files are edited together, always.
 - **`git ls-remote` never fetches objects.** It returns refs over HTTP. Reading it
   as proof of a clone sends you looking for files that were never downloaded —
   exactly the confusion that opened this feature.
