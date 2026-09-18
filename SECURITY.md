@@ -15,7 +15,7 @@ suposición, está marcada como tal.
 | Garantía | Cómo se implementa |
 | --- | --- |
 | Sin ruta directa a Internet para los agentes | `hermes` y `opencode` están **solo** en la red `agents` (`internal: true`). Esa red no tiene gateway: no hay salida ni resolución externa de nombres. |
-| Egreso mediado y con allowlist | El único contenedor con salida es `egress-proxy` (Squid). Solo pasa lo que figura en `squid/allowlist.txt`; el resto se deniega con `403` y queda en el log del proxy. |
+| Egreso mediado y con allowlist | El único contenedor con salida es `egress-proxy` (Squid). Solo pasa lo que figura en `squid/allowlist.txt`; el resto se deniega con `403` y queda en el log del proxy. La allowlist acota el **destino**, no el contenido: ver «Puntos de atención». |
 | Nada entra desde el host o la LAN | Ningún servicio publica puertos. El bot de Telegram funciona por polling saliente. |
 | Sin pivotaje hacia la red interna o metadata de cloud | Squid deniega rangos privados (`10/8`, `172.16/12`, `192.168/16`, `127/8`, `169.254/16`, `fc00::/7`, …) antes de evaluar la allowlist. |
 | Sin escalada de privilegios | `no-new-privileges` y `ulimits.core: 0` en los tres. `cap_drop: [ALL]`: entero en `egress-proxy` y en `opencode`; en `hermes` con el mínimo readmitido (ver abajo). |
@@ -86,25 +86,43 @@ bootstrap, sincroniza sus 58 skills incluidas y no reporta errores. Quedan
 listados y comentados en la allowlist para que los habilites solo si los
 necesitás.
 
-Lo que **no** está verificado todavía: una llamada real al proveedor de
-modelos. Requiere una clave con crédito. Lo único que se puede afirmar es que
-`.opencode.ai` está habilitado en la allowlist por evidencia del código de la
-imagen, no por una respuesta 200 observada.
+La llamada real al proveedor de modelos quedó **verificada después**, con el log
+del proxy: aparece como túnel autorizado, no como denegación.
 
-## Variables requeridas
+```text
+domain=models.opencode.ai  method=CONNECT squid=TCP_TUNNEL http=200
+```
+
+`.opencode.ai` fue la única entrada de la allowlist habilitada por evidencia del
+código de la imagen antes de tener esa observación.
+
+## Variables de entorno
 
 `compose.yml` interpola estas variables desde un `.env` **externo y no
-versionado**. Si falta alguna, compose aborta con un mensaje explícito en vez
-de arrancar con claves vacías:
+versionado**; `.env.example` trae los siete nombres, sin valores. Cuatro son
+**obligatorias**: compose aborta con un mensaje explícito si faltan, en vez de
+arrancar con claves vacías (`${VAR:?…}`). Las otras tres tienen default vacío
+(`${VAR:-}`).
 
 ```ini
-# Hermes (gateway de Telegram)
+# Obligatorias
+HOST_DATA_DIR=               # carpeta del host donde vive todo el estado
 TELEGRAM_BOT_TOKEN=          # token emitido por @BotFather
 HERMES_OPENCODE_GO_API_KEY=  # clave del proveedor de modelos que usa Hermes
-
-# OpenCode (agente de código)
 OPENCODE_GO_API_KEY=         # clave del proveedor de modelos que usa OpenCode
+
+# Opcionales
+TELEGRAM_ALLOWED_USERS=      # allowlist de usuarios de Telegram (ver arriba)
+OPENCODE_SERVER_PASSWORD=    # HTTP Basic del server de opencode
+GITHUB_TOKEN=                # PAT fine-grained; ver «Autenticación de GitHub»
 ```
+
+`HERMES_OPENCODE_GO_API_KEY` y `OPENCODE_GO_API_KEY` normalmente llevan la misma
+clave: `compose.yml` renombra la primera a `OPENCODE_GO_API_KEY` dentro de
+`hermes`, que es como la espera la imagen.
+
+Ojo al inspeccionar: `docker compose config` **sin argumentos imprime los valores
+resueltos** del `.env` en la salida estándar. Con `-q` valida sin exponerlos.
 
 Riesgo residual asumido: las variables de entorno son legibles con
 `docker inspect hermes`, `docker inspect opencode` y en `/proc/1/environ`.
@@ -237,11 +255,20 @@ Son **dos contenedores separados** que se hablan por **red**, no dos procesos en
 mismo contenedor. Verificado:
 
 ```text
-/hermes   ip=172.19.0.3 pid_host=69678
-/opencode ip=172.19.0.2 pid_host=69619
+/hermes       ip=172.19.0.2
+/opencode     ip=172.19.0.4
+/egress-proxy ip=172.19.0.3
 hermes: command -v opencode -> NO EXISTE
-unico volumen compartido: /workspace
 ```
+
+Las IPs de la red `agents` son efímeras: se reasignan cada vez que se recrean
+los contenedores (ya pasó, y es la razón por la que este bloque estuvo mal). Lo
+estable es el nombre de servicio: `http://opencode:4096`.
+
+Lo que comparten no es solo `/workspace`. `hermes` recibe además dos montajes
+read-only desde el repo: `hermes/skills` → `/opt/data/skills/stack` y
+`hermes/context/.hermes.md` → `/workspace/.hermes.md`. Y `/workspace` es un
+**bind** a `${HOST_DATA_DIR}/workspace`, no un volumen.
 
 | Pieza | Cómo está |
 | --- | --- |
@@ -249,7 +276,7 @@ unico volumen compartido: /workspace
 | Alcance | Solo la red `agents`. El puerto **no** se publica: no lo alcanza el host ni la LAN. |
 | Dirección del flujo | Hermes llama a `http://opencode:4096`. Al revés no hace falta. |
 | Credenciales | Ninguna por defecto. Con `OPENCODE_SERVER_PASSWORD` en `.env`, el servidor exige HTTP Basic (usuario `opencode`) y Hermes lo manda desde su entorno. |
-| Conocimiento | Skill `opencode-server` en `hermes/skills/`, montada **read-only**: el agente no puede reescribir sus propias instrucciones. |
+| Conocimiento | Skill `opencode-server` en `hermes/skills/`, montada **read-only** en `/opt/data/skills/stack`: el agente no puede reescribir **estas** instrucciones. El resto de su árbol de skills vive en el bind escribible `/opt/data`, que sí puede modificar — y lo hace durante el bootstrap. |
 | Egreso | Sin cambios: opencode no tiene ruta propia. Su llamada al modelo aparece como `models.opencode.ai TCP_TUNNEL` en el log del proxy. |
 
 ### Por qué conviene poner el password
@@ -312,8 +339,8 @@ SQLite en modo **WAL** sobre una carpeta de Windows (virtiofs/9p) puede
 corromperse en silencio: el WAL necesita memoria compartida y bloqueos que no son
 coherentes cruzando la frontera de la VM. Lo dice Hermes con todas las letras en
 su log (`cross-VM filesystem ... concurrent writers can silently corrupt the
-database`) y lo medimos leyendo el header de cada base (bytes 18-19: `1 1` =
-rollback, `2 2` = WAL):
+database`) y lo medimos leyendo el header de cada base (offsets 18 y 19 contando desde 0, los
+dos bytes de versión de formato: `1 1` = rollback, `2 2` = WAL):
 
 | Base | Modo medido | Se puede fijar en rollback? |
 | --- | --- | --- |
@@ -336,9 +363,13 @@ sobreviven, y `engram export` / `opencode export` permiten reconstruir.
 
 ## Autenticación de GitHub en el contenedor de opencode
 
-Herramientas disponibles: `git` 2.54.0, `gh` 2.97.0, `curl`, `node`, `npm`, `go`
-1.26.8, `uv` 0.11.19, `jq`. **No** hay cliente `ssh`, y no es un olvido: el proxy
-solo permite `CONNECT` al puerto 443, así que SSH por el 22 es imposible. Las URLs
+Herramientas disponibles, medidas en la imagen que está corriendo: `git` 2.54.0,
+`gh` 2.97.0, `curl`, `node` 24.18.1, `npm`, `go` 1.26.8, `uv` 0.11.19, `jq`
+1.8.2, `rg` 15.1.0. **Ninguna está pinneada** — `apk` y los tags `latest` se
+resuelven al construir — así que describen la imagen medida, no una garantía a
+futuro: para auditar una versión hay que medirla otra vez en el contenedor.
+**No** hay cliente `ssh`, y no es un olvido: el proxy solo permite `CONNECT` al
+puerto 443, así que SSH por el 22 es imposible. Las URLs
 `git@github.com:` se reescriben a HTTPS con `insteadOf`, en la config de SISTEMA
 (`/etc/gitconfig`), así que cualquier receta que use la forma SSH funciona igual:
 
@@ -373,6 +404,12 @@ Verificado con un token dummy: `git credential fill` para `github.com` devuelve
   `${HOST_DATA_DIR}/git/config` vía `GIT_CONFIG_GLOBAL`, así que sobrevive a los
   recreates. Verificado escribiendo desde el contenedor y leyendo el archivo en
   el host.
+- **`scripts/export-state.sh` deja el password en el `argv`.** Construye
+  `curl -u "opencode:$OPENCODE_SERVER_PASSWORD"` como parámetros posicionales
+  (que es lo correcto para que sobreviva caracteres raros), y eso lo vuelve
+  legible en el `ps` del contenedor mientras corre. No agrega un secreto nuevo
+  — el agente ya tiene esa variable en su entorno — pero sí una copia fuera del
+  entorno, en un lugar que cualquier proceso del contenedor puede leer.
 
 ## Python y Go dentro del contenedor
 
@@ -405,8 +442,9 @@ Dos cosas que conviene saber porque **no** son errores:
   el contenedor. Para una herramienta que quieras fija, agregala al Dockerfile;
   para uso puntual, `uvx <cli>`.
 
-Puertos de salida usados y permitidos: `pypi.org` y `files.pythonhosted.org`
-(verificado instalando `six`).
+Hosts que esto necesita en la allowlist: `pypi.org` y `files.pythonhosted.org`
+(verificado instalando `six`). Los puertos de salida permitidos son 80 y 443, y
+para `CONNECT` —o sea HTTPS— solo 443.
 
 ### Go
 
@@ -432,11 +470,20 @@ silencio. Por eso la alineación se hace al revés: **opencode corre con el uid 
 Hermes (10000)**, y entonces todo archivo que crea cualquiera de los dos tiene el
 mismo dueño.
 
-Requiere que las carpetas montadas y los dos volúmenes pertenezcan a ese uid:
+Requiere que las carpetas que monta `opencode` y los dos volúmenes pertenezcan a
+ese uid. `scripts/fix-permissions.ps1` cubre `opencode`, `go`, `backups`, `git`,
+`workspace` y los dos volúmenes; `${HOST_DATA_DIR}/hermes` queda afuera a
+propósito, porque lo usa `hermes` con su propia alineación:
 
 ```bash
 pwsh -File scripts/fix-permissions.ps1   # lee HOST_DATA_DIR del .env
 ```
+
+Vale saber qué hace: un `docker run --rm` de `alpine:latest` — imagen **sin
+pinear** — corriendo como root, con `${HOST_DATA_DIR}` montado, que aplica
+`chown -R 10000:10000` sobre cinco subcarpetas y los dos volúmenes. Es un tercero
+con capacidad de escritura sobre el host, acotado a esos paths, invocado por un
+paso que es obligatorio.
 
 Hay que volver a correrlo si alguna de esas carpetas se recrea desde cero.
 
@@ -501,6 +548,16 @@ el repo: si alguna vez regenerás la config con `hermes setup`, hay que volver a
 
 ## Puntos de atención
 
+- **La allowlist controla el destino, no el contenido.** Squid no intercepta
+  TLS — no hay `ssl_bump` en `squid.conf` — así que autoriza `CONNECT` a un
+  dominio y a partir de ahí el túnel es opaco. Consecuencia práctica: cualquier
+  host de la allowlist es una ruta de salida usable para *cualquier* payload.
+  `mcp.context7.com` y `mcp.grep.app` son terceros con los que el agente habla
+  por diseño, y `.github.com` está habilitado con el `GITHUB_TOKEN` disponible.
+  El control real es «a qué dominios puede hablar», no «qué puede mandar»: si el
+  agente llega a manejar material que no debe salir, este es el límite que hay
+  que asumir, y la mitigación es sacar el host de la lista, no confiar en el
+  filtro.
 - **Hermes intenta descubrir IPs de Telegram por DNS-over-HTTPS.** Al conectar
   pide `dns.google` y `cloudflare-dns.com`; el proxy los deniega y la conexión
   igual se establece contra `api.telegram.org`. Dejalo bloqueado: habilitar esos
