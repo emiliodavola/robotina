@@ -29,9 +29,11 @@ Verified capability split between the two containers:
    says where the credential lives.
 2. **Never write a token into a prompt, a file, a commit, or a session transcript.**
    Do not ask OpenCode to print one either.
-3. **Public repositories: clone them here.** `git` works through the egress proxy
-   without credentials. `git ls-remote https://github.com/<owner>/<repo>` is a cheap
-   check, and `git@github.com:` URLs are rewritten to HTTPS automatically.
+3. **Public repositories: clone them here, over `https://` URLs.** `git` works through
+   the egress proxy without credentials. `git ls-remote https://github.com/<owner>/<repo>`
+   is a cheap check. `git@github.com:` does not work from here: this container has no
+   rewrite — that one lives in `opencode` — and ssh cannot reach the Internet through
+   the proxy, which allows `CONNECT` to port 443 only.
 4. **Private repositories, and anything that pushes: delegate to OpenCode.** It has
    the credentials, and it shares `/workspace`.
 5. **A `404` on a private repo means "no credentials", not "no such repo".** GitHub
@@ -60,4 +62,5 @@ problem — do not ask for a fresh token in the chat.
 | `404` on a private repo **from this container** | Expected: there are no credentials here. Delegate to OpenCode. |
 | `404` on a private repo **from OpenCode** | The PAT does not include that repo, or it expired. Report it as a permissions problem. |
 | `403` with an HTML body | The host is not in the proxy allowlist. See the egress notes in the `opencode-server` skill. |
+| `403` with a git body (`Write access to repository not granted.`) | GitHub itself: the token does not cover that repository. A permissions problem, not an allowlist problem. |
 | `Permission denied` writing in `/workspace` | Ownership problem on the shared mount, not a credential problem. Report it; the host has `scripts/fix-permissions.ps1`. |
