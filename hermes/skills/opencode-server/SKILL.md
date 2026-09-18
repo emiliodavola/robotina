@@ -28,10 +28,55 @@ so anything it writes is visible here immediately, and vice versa.
 
 - Do not try to install or run the OpenCode CLI in this container. Use the HTTP API.
 - Do not hardcode `OPENCODE_SERVER_PASSWORD` anywhere, and never print it in output.
+- **Do not ask the user for a GitHub token, and never paste credentials into a
+  prompt.** This container has no GitHub credentials on purpose; the sibling
+  container already has them (see the next section).
 - Do not assume new outbound hosts will work: this container has **no direct Internet**.
   Everything external goes through `egress-proxy` with a domain allowlist. A task that
   needs a new host means editing `squid/allowlist.txt` on the host and restarting the
   proxy — report that to the user instead of working around it.
+
+## GitHub and private repositories
+
+Split of capabilities, verified:
+
+| | this container (`hermes`) | the `opencode` container |
+| --- | --- | --- |
+| `git` | yes (2.47) | yes (2.54) |
+| `gh`, GitHub credentials | **no** — no `gh`, no `GITHUB_TOKEN`, no credential helper | **yes** — `gh` plus a fine-grained PAT in `GITHUB_TOKEN`, wired as git's credential helper |
+| Shared state | `/workspace` | `/workspace` |
+
+So:
+
+- **Public repositories**: clone them here directly. `git` works through the proxy
+  without credentials (`git ls-remote https://github.com/<owner>/<repo>` is a cheap
+  check). SSH URLs work too: `git@github.com:` is rewritten to HTTPS.
+- **Private repositories, and anything that pushes**: delegate to OpenCode. Do not
+  try to authenticate from here, and do not ask the user for a token — the stack
+  already holds one, in the container that needs it.
+- **Never write a token into a prompt, a file, a commit, or a session transcript.**
+
+Recipe: ask OpenCode to clone into the shared workspace, then work on the checkout
+from here.
+
+```sh
+set --
+[ -n "$OPENCODE_SERVER_PASSWORD" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"
+
+SID=$(curl -s "$@" -X POST http://opencode:4096/session \
+        -H 'Content-Type: application/json' \
+        -d '{"title":"clone private repo"}' \
+      | sed -n 's/.*"id":"\(ses_[^"]*\)".*/\1/p')
+
+curl -s "$@" -X POST "http://opencode:4096/session/$SID/message" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":{"providerID":"opencode","modelID":"mimo-v2.5-free"},
+       "parts":[{"type":"text","text":"Clona con git (ya tenes credenciales configuradas) el repo <owner>/<repo> en /workspace/<repo> y decime el commit HEAD. No borres ni toques nada mas."}]}' \
+  --max-time 900
+```
+
+After that, `/workspace/<repo>` is a real checkout you can read, edit and build with,
+and both containers see it.
 
 ## API (verified against OpenCode 1.18.31)
 
