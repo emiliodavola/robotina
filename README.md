@@ -168,10 +168,6 @@ Nada sale si no está en `squid/allowlist.txt`. Para habilitar un destino:
      egress-proxy -f /etc/squid/squid.conf -k parse
    ```
 
-   Corrélo desde PowerShell. En Git Bash/MSYS las rutas absolutas se reescriben
-   (vas a ver un `C:/Program Files/Git/usr/sbin/squid` que no existe) y hay que
-   anteponer `MSYS_NO_PATHCONV=1`.
-
 4. Si algo rebota, mirá el log del proxy. Registra el dominio, no la URL:
 
    ```bash
@@ -217,13 +213,10 @@ Medido dentro de los contenedores que corren, no copiado de la documentación.
 | LSPs | marksman 2026-02-08, basedpyright 1.39.9, vscode-langservers 4.10.0, dockerfile-language-server 0.15.0, taplo y R `languageserver` | npm / `apk` / R |
 
 `opencode/Dockerfile` pinea engram, gentle-ai, marksman y los paquetes npm, y
-**verifica por checksum las descargas de engram y gentle-ai**. marksman queda
-pinneado por tag de release — un tag que su dueño puede mover — y sin verificación
-de integridad; los paquetes npm quedan pinneados por versión, sin checksum a
-nivel de Dockerfile. Todo lo demás se resuelve al construir (tags `latest` y
-`apk` sin versión), así que **estas versiones describen la imagen medida, no una
-garantía a futuro**: para auditar una versión concreta hay que volver a medirla
-en el contenedor.
+verifica los binarios por checksum. Todo lo demás se resuelve al construir (tags
+`latest` y `apk` sin versión), así que **estas versiones describen la imagen
+medida, no una garantía a futuro**: para auditar una versión concreta hay que
+volver a medirla en el contenedor.
 
 ## Modelo de seguridad, en cinco líneas
 
@@ -239,10 +232,6 @@ residual más filoso es que los secretos son variables de entorno, legibles con
 
 ## Decisiones deliberadas
 
-- **Sin GitHub Actions.** No hay código que testear más allá de `docker compose
-  config` y los scripts, y un workflow es configuración ejecutable: el agente
-  tiene push sobre este repo. Con secretos en el repo, un workflow sería el
-  camino más corto hacia ellos. Se revisa si eso cambia.
 - **Hermes no tiene credenciales de GitHub.** Ni `GITHUB_TOKEN`, ni credential
   helper, ni `~/.config/gh`. Los repos privados y los push se delegan a OpenCode.
 - **SSH es imposible, por diseño.** El proxy solo permite `CONNECT` al puerto
