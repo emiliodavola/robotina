@@ -2,7 +2,7 @@
 
 [Español](README.md) · [English](README.en.md)
 
-Two autonomous coding agents, each in its own container, sharing one workspace
+Two autonomous agents, each in its own container, sharing one workspace
 and with **no direct route to the Internet**: all their egress goes through a
 Squid proxy that only lets a whitelist of domains out.
 
@@ -44,8 +44,8 @@ something happen?" and becomes "how far can it get?".
   │  gateway       │   │  no TUI        │   │  uid 13, rootfs│
   │  uid 10000     │   │  uid 10000     │   │  read-only     │
   └────────────────┘   └────────────────┘   └───────┬────────┘
-        │                     │                    │
-        └── shared /workspace (host bind) ─────────┘
+        │                     │                     │
+        └── shared /workspace (host bind) ──────────┘
                                                     │  network "egress" (has a gateway)
                                                     ▼
                                     CONNECT/GET only to squid/allowlist.txt
@@ -65,12 +65,12 @@ Three consequences of the design worth knowing up front:
 
 ## Requirements
 
-- Windows with Docker Desktop (the design assumes Windows bind mounts, and the
+- Docker (the design assumes Windows bind mounts, and the
   startup path was measured there).
 - Docker Compose v2.
 - PowerShell 7 (`pwsh`) for `scripts/fix-permissions.ps1`.
 - A Telegram bot token (`@BotFather`).
-- A model provider key (the OpenCode Go / Zen plan).
+- A model provider key.
 - Optional: a fine-grained GitHub PAT with **only the repositories you need** and
   Contents read/write, so OpenCode can clone private repos and push.
 - Internet access on the host to build the opencode image and pull the base
@@ -248,10 +248,6 @@ inside the container.
 
 ## Deliberate decisions
 
-- **No GitHub Actions.** There is no code to test beyond `docker compose config`
-  and the scripts, and a workflow is executable configuration: the agent has
-  push access to this repo. With secrets in the repo, a workflow would be the
-  shortest path to them. Revisit if that changes.
 - **Hermes has no GitHub credentials.** No `GITHUB_TOKEN`, no credential helper,
   no `~/.config/gh`. Private repos and pushes are delegated to OpenCode.
 - **SSH is impossible, by design.** The proxy only allows `CONNECT` on port 443,
