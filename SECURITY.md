@@ -312,6 +312,37 @@ clave en su propio entorno, y esa configuración se verifica con hashes. Lo que 
 promete es que un proceso no pueda leer la clave del otro si se lo propone. No afirmes lo
 segundo: no es cierto a igual uid.
 
+### R3 — Las capabilities son del contenedor, no del proceso (medido)
+
+`cap_drop: [ALL]` con `cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]` es una
+propiedad **del contenedor**: el *bounding set* del cgroup es lo que hereda cada proceso, y no hay
+forma de darle a un proceso un conjunto de capabilities distinto al de otro dentro del mismo
+contenedor. Lo que sí se midió es que el proceso de la app (uid 10000) **no conserva ninguna**:
+
+| Proceso | `CapInh` | `CapPrm` | `CapEff` | `CapBnd` | `CapAmb` | `NoNewPrivs` |
+| --- | --- | --- | --- | --- | --- | --- |
+| PID 1 (`s6-svscan`, uid 0) | `0x0` | `0xeb` | `0xeb` | `0xeb` | `0x0` | 1 |
+| `opencode serve` (uid 10000) | `0x0` | `0x0` | `0x0` | `0xeb` | `0x0` | 1 |
+
+Decodificación de los seis bits de `0xeb` = 235 = `0b11101011`:
+
+| Bit | Valor | Capability |
+| --- | --- | --- |
+| 0 | 1 | `CAP_CHOWN` |
+| 1 | 2 | `CAP_DAC_OVERRIDE` |
+| 3 | 8 | `CAP_FOWNER` |
+| 5 | 32 | `CAP_KILL` |
+| 6 | 64 | `CAP_SETGID` |
+| 7 | 128 | `CAP_SETUID` |
+
+`CAP_KILL` es la sexta y la agregó el apply (slice 10) para que los supervisores root puedan
+señalar a sus hijos de uid 10000: sin ella, un apagado iniciado adentro del contenedor se trababa.
+El proceso de la app **no** puede ganarla — su `CapEff` es `0x0` y `NoNewPrivs: 1` impide que la
+recupere por `exec` de un binario con *file capabilities*. Es decir: readmitir `KILL` en el
+contenedor no amplía lo que el agente puede hacer. Lo que **no** se promete es que el agente corra
+con un conjunto de capabilities *distinto* al del resto del contenedor; eso es imposible con un
+único bounding set.
+
 ### R4 — Ciclo de vida único
 
 El contenedor tiene **un solo ciclo de vida**, compartido por todos los procesos de adentro.
@@ -330,6 +361,34 @@ gateway lo reinicia s6 **en el lugar** y el contenedor sigue corriendo (`Restart
 `StartedAt` sin cambios). Lo que se acepta, entonces, no es «un ciclo de vida que sigue a
 Hermes» sino **un ciclo de vida de contenedor compartido**: los agentes viven y mueren con el
 contenedor, no con el gateway. El detalle medido está en «Apagado y ciclo de vida».
+
+### R5 — Presupuesto de recursos compartido (medido)
+
+El merge convierte `mem_limit: 2g + 4g`, `cpus: 2.0 + 4.0` y dos `pids_limit: 512` en **un solo**
+presupuesto por cgroup. Lo que se acepta es exactamente eso — un techo **compartido** —, no un techo
+recortado en silencio:
+
+| Recurso | Valor | Por qué |
+| --- | --- | --- |
+| `mem_limit` | `6g` | suma de los dos anteriores (2g + 4g) |
+| `cpus` | `6.0` | suma de los dos anteriores (2.0 + 4.0) |
+| `pids_limit` | `1024` | paridad exacta con el peor caso anterior (512 + 512) |
+
+El valor de `pids_limit` se decidió **antes** de medir (design §16) con una regla pre-comprometida:
+pico ≤ 614 (60 % de 1024) → confirmar 1024; pico > 614 → subir a 1536 y después a 2048; pico ≥ 256
+pero chico → dejar 1024 igual. La medición confirmó el valor original:
+
+- **Línea base en reposo:** `pids.current = 52` de `pids.max = 1024`, sin sesión de OpenCode.
+- **Pico medido:** `pids.current = 478` (mediana `329`, mínimo `60`) sobre **900 muestras a 1 Hz**
+  con el peor caso concurrente corriendo; `pids.max = 1024` (finito, nunca `max`).
+- **Veredicto de la regla:** `478 ≤ 614` → **se confirma `1024`**. `compose.yml` **no** se tocó.
+  Headroom en el pico: 546 PIDs (53 % del límite).
+- **Método de lectura:** `cat /sys/fs/cgroup/pids.current` una vez por segundo; el pico es el máximo
+  de la serie completa, no un valor instantáneo elegido a mano.
+
+`pids_limit` es la restricción **vinculante** del conteo de procesos: `nofile` queda holgado con el
+default de Docker. El detalle del trabajo que produjo el pico, y lo que **no** se pudo reproducir,
+está en «Evidencia medida».
 
 ### R6 — El documento de tareas de interoperación queda superseded
 
@@ -665,7 +724,153 @@ si alguna vez regenerás la config con `hermes setup`, hay que volver a aplicarl
 
 ## Evidencia medida
 
-_(Pendiente: la agrega la tarea de medición. Incluirá las máscaras de capacidades del proceso de
-uid 10000 con su decodificación, el presupuesto de recursos con el valor confirmado y el pico
-registrado, el resultado observado del anidamiento de volúmenes y el comportamiento del arranque
-cuando el gate de readiness no se satisface.)_
+Todo lo de esta sección sale de la corrida real (2026-09-22, contenedor `robotina` en Docker Desktop
+para Windows, los dos servicios `(healthy)`), no de estimaciones. Las recetas usan patrones de
+caracteres (`[o]pencode serve`, `[h]ermes gateway`), un match vacío es FAILURE, y `docker inspect`
+siempre va con `--format` acotado.
+
+### Capacidades (R3)
+
+```text
+$ docker compose exec robotina sh -c 'for p in $(pgrep -f "[o]pencode serve"); do echo "pid=$p uid=$(awk \047/^Uid/{print $2}\047 /proc/$p/status)"; grep -E "Cap(Inh|Prm|Eff|Bnd|Amb)|NoNewPrivs" /proc/$p/status; done'
+pid=416 uid=10000
+CapInh:	0000000000000000
+CapPrm:	0000000000000000
+CapEff:	0000000000000000
+CapBnd:	00000000000000eb
+CapAmb:	0000000000000000
+NoNewPrivs:	1
+```
+
+`0xeb` = 235 = `0b11101011`: `CHOWN`(1) + `DAC_OVERRIDE`(2) + `FOWNER`(8) + `KILL`(32) +
+`SETGID`(64) + `SETUID`(128). El proceso de la app conserva la máscara de *bounding* pero
+**no** tiene ninguna efectiva (`CapEff=0x0`), y `NoNewPrivs: 1` le impide recuperarlas. El detalle
+de por qué son del contenedor y no del proceso está en R3.
+
+### Presupuesto de recursos y pico de `pids` (R5)
+
+```text
+$ docker compose exec robotina sh -c 'cat /sys/fs/cgroup/pids.current; cat /sys/fs/cgroup/pids.max'
+52
+1024
+$ docker compose exec robotina sh -c 'i=0; while [ $i -lt 900 ]; do cat /sys/fs/cgroup/pids.current; i=$((i+1)); sleep 1; done' | sort -n | tail -1
+478
+(900 muestras: mínimo 60, mediana 329, máximo 478)
+```
+
+El pico se buscó con el peor caso concurrente corriendo **en paralelo** durante toda la ventana.
+Lo que sí se reprodujo:
+
+1. una **sesión real de OpenCode** por la API de loopback (creada con `POST /session` y manejada con
+   `/session/{id}/message`) sobre un workspace con `.py`, `.R`, `.toml`, `.md`, `.json` y un
+   `Dockerfile`: los LSP `python`/`pyright`, `json`, `toml`, `r` y `marksman` quedaron `connected`;
+2. builds de fuente de R con `Ncpus=6` (80 unidades de traducción C, `--preclean`, cuatro workers
+   concurrentes) → tormenta de `gcc`;
+3. `go build -a ./...` + `go vet ./...` sobre un módulo de 41 archivos (dos workers);
+4. `npm ci` + `node --test --test-concurrency=6` (dos workers);
+5. una tormenta de fork extra: `basedpyright` con varios workers de Node por invocación y un
+   `R languageserver` de vida corta.
+
+Lo que **no** se pudo reproducir, dicho sin adornos: **el tráfico de Telegram**. La conexión de
+*long poll* del gateway está viva y contada en la línea base, pero no se generó una ráfaga de
+mensajes: originarla requiere que un humano escriba al bot o enviar mensajes reales al chat del
+usuario, y eso no se hizo. El pico registrado es, entonces, el del peor caso **sin** esa ráfaga;
+Telegram aporta pocos procesos frente a un build concurrente, así que la omisión es menor, pero no
+se presenta como el peor caso completo.
+
+### Anidamiento de volúmenes (SL2)
+
+```text
+$ docker compose exec robotina sh -c 'mount | grep -E "\.engram|\.local/share/opencode"'
+/dev/sdd on /opt/data/.engram type ext4 (rw,relatime)
+/dev/sdd on /opt/data/.local/share/opencode type ext4 (rw,relatime)
+$ ls -A "$HOST_DATA_DIR/hermes/.engram"     # control negativo: el marcador NO aparece en el bind
+# (vacío)
+$ docker volume ls --format '{{.Name}}' | grep -cE '^robotina_(engram|opencode)_db$'
+2
+```
+
+Los dos volúmenes WAL son **`ext4`**, no `9p` ni `virtiofs`: Docker Desktop los presenta como un
+volumen nativo, y eso es lo que hace segura la escritura WAL. La prueba positiva y el control
+negativo cierran el riesgo D-1: un marcador escrito adentro del volumen (`.robotina-probe`) **no**
+aparece en la carpeta del host (`hermes/.engram` queda vacía) y **sobrevive** a `docker compose down`
++ `up -d`. `HOST_DATA_DIR` contiene solo `backups`, `hermes` y `workspace`, que es el contrato del
+layout de persistencia.
+
+### Apagado y ciclo de vida
+
+```text
+$ start=$(date +%s%N); docker compose stop robotina; end=$(date +%s%N)
+Stopping robotina  ...  Stopped
+stop_duration_ms=5504        -> 5.50 s (dentro de stop_grace_period: 20s)
+ExitCode=0  OOMKilled=false
+# log: opencode-ready -> opencode -> main-hermes -> dashboard -> engram -> opencode-init
+#      -> legacy-cont-init -> fix-attrs, todos "successfully stopped"; el gateway recibe SIGTERM
+```
+
+Apagado **ordenado**, sin `SIGKILL` de Docker: ese es el efecto observable de la sexta capability
+(`CAP_KILL`). Antes de agregarla, el mismo `stop` se trababa y Docker terminaba matando PID 1
+pasado el grace period. El contrato medido completo —el gateway es un servicio de s6 que se
+reinicia **en el lugar**; el contenedor sale cuando baja el árbol de supervisión— está en «Apagado y
+ciclo de vida (medido)» y en R4.
+
+### Gate de readiness
+
+```text
+ciclo 1: StartedAt 19:05:59.228674207Z -> "opencode listo (intentos=1)" 19:06:03.569450221Z  = 4.34 s
+ciclo 2: StartedAt 19:06:26.496136427Z -> "opencode listo (intentos=1)" 19:06:31.056849886Z  = 4.56 s
+ciclo 3: StartedAt 19:06:53.652872543Z -> "opencode listo (intentos=1)" 19:06:58.092762695Z  = 4.44 s
+probe_exit=0 en los tres; intentos=1 en los tres; bound = 120 s
+$ docker compose logs --since 10m robotina | grep -Ei '127\.0\.0\.1:4096.*(refused|econnrefused)'
+# (sin salida)
+```
+
+El gate se satisface en el **primer** intento y **nunca** aparece un `ECONNREFUSED` en el log: el
+primer llamado de Hermes no compite con el arranque.
+
+**Qué pasa si el gate falla** (observado forzando el fallo en un contenedor descartable, no
+inferido): s6-overlay **continúa al CMD** con un warning por servicio y un arranque **degradado**,
+no aborta:
+
+```text
+s6-rc: info: service opencode-ready: starting
+s6-rc: warning: unable to start service opencode-ready: command exited 1
+# docker inspect -> Status=running Running=true ExitCode=0
+# S6_BEHAVIOUR_IF_STAGE2_FAILS sin definir (0 matches en /proc/1/environ)
+```
+
+Con `S6_BEHAVIOUR_IF_STAGE2_FAILS` sin definir, el `rc.init` real toma el valor por defecto `b=0`,
+así que ni la rama de warning ni la de `haltwith` se activan y el CMD igual se ejecuta. Es el
+escenario D-6 del design (arranque degradado) y no un cierre del stack.
+
+### Autenticación del endpoint (EP1/EP4, §19.4)
+
+```text
+$ docker compose exec robotina sh -c 'set --; [ -n "${OPENCODE_SERVER_PASSWORD:-}" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"; curl -fsS "$@" -m 5 http://127.0.0.1:4096/global/health'
+{"healthy":true,"version":"1.18.32"}   # exit=0
+$ docker compose exec robotina sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -m 5 http://127.0.0.1:4096/global/health'
+401
+$ docker compose exec robotina sh -c 'ss -ltn | grep 4096'
+LISTEN 0 512 127.0.0.1:4096 0.0.0.0:*
+```
+
+El endpoint **sí** está protegido: una sonda sin autenticación responde **HTTP 401**, con la credencial responde
+**200**. Escucha solo en `127.0.0.1` —no hay bind comodín— y el puerto **no** se publica.
+
+### Notas que necesitaron interpretación (§19.5)
+
+- **EP2 (sonda del host):** desde el host, `curl -m 5 -sS http://127.0.0.1:4096/global/health` →
+  `curl: (7) Failed to connect … Connection refused` (exit 7), y
+  `Get-NetTCPConnection -LocalPort 4096` devuelve **0** listeners. Es decir: la sonda falla por
+  *no haber puerto*, no porque otra cosa lo ocupe. Ojo con un detalle: `curl` **sin `-f`** devuelve
+  exit 0 aunque la respuesta sea 401, así que la comprobación de autenticación compara el **código
+  HTTP**, no el exit de `curl`.
+- **ID1 (fuente del montaje):** en `mountinfo` la fuente del bind es la ruta del lado de la VM
+  (`/run/desktop/mnt/host/c/…`), no la ruta Windows; el montaje del skin apunta a la carpeta del
+  **repo** (`hermes/skins`), no a `HOST_DATA_DIR`, que es la intención que había que probar.
+- **SL3 (lectura de engram):** el comando de lectura es
+  `docker compose exec robotina engram export /backups/engram-<fecha>.json`, el mismo que usa
+  `scripts/export-state.sh`, válido porque `ENGRAM_DATA_DIR` es del contenedor entero. No se inventó
+  ninguna invocación nueva.
+- **Sonda in-container `robotina:4096`:** queda confundida por el entorno de proxy (Squid responde
+  con una página de deny, exit 0); la prueba no confundida es el rechazo desde un contenedor par.

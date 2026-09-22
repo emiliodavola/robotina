@@ -310,7 +310,7 @@ survive.
 
 **The numeric proofs in this documentation assume the default uid.** The image's
 `hermes` user is uid 10000, and the recipes that print `10000:10000`,
-`CapBnd=0x00000000000000cb` or `pids.max=1024` hold for that configuration. A
+`CapBnd=0x00000000000000eb` or `pids.max=1024` hold for that configuration. A
 different `HERMES_UID` invalidates them without invalidating the design.
 
 ## Versions
@@ -354,10 +354,12 @@ inside the container.
 
 ## Deliberate decisions
 
-- **A single lifecycle.** Being one container, if Hermes falls s6 restarts it;
-  if the main program goes down, the container goes with it, and `opencode` and
-  `engram` do not survive on their own. This is the merge's accepted regression
-  (R4 in `SECURITY.md`).
+- **A single lifecycle, and it is the container's.** The Hermes gateway is an s6
+  service (`gateway-default`): if it falls, s6 restarts it **in place** and the
+  container stays up, with `RestartCount` and `StartedAt` unchanged. What is
+  shared is the container's lifecycle: it exits when the **s6 supervision tree**
+  goes down, not when Hermes exits, and `opencode` and `engram` go with it. This
+  is the merge's accepted regression (R4 in `SECURITY.md`).
 - **One uid for the whole tree (10000).** Per-process key isolation is not
   enforceable at equal uid; what is required is that each process is configured
   **with only its own key**, and startup verifies it (R2).

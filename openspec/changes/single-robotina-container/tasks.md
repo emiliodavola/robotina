@@ -473,7 +473,7 @@ inferred.
     table, and **escalate to the user as a new decision** (accept-and-document or a follow-up
     change). Do **not** add `capsh`/`setpriv`/`libcap2-bin` in this change (D2).
 
-- [ ] 26. **[measurement-dependent]** Sample the merged cgroup's `pids.current` baseline and
+- [x] 26. **[measurement-dependent]** Sample the merged cgroup's `pids.current` baseline and
   its 1 Hz peak while the worst-case workload runs concurrently (design §16): an OpenCode
   session exercising all six LSPs, an R source build with `Ncpus=6`, `go build ./...`,
   `npm ci && npm test` with a parallel runner, and Telegram traffic for the duration.
@@ -627,7 +627,7 @@ inferred.
 
 ## Phase 7 — `pids_limit` confirmation
 
-- [ ] 38. **[measurement-dependent]** Apply design §16's pre-committed adjustment rule to the
+- [x] 38. **[measurement-dependent]** Apply design §16's pre-committed adjustment rule to the
   task-26 peak and confirm or change the value, recording peak, limit and rationale in one
   place. Files: `compose.yml` (only when the rule raises the value),
   `odd/tasks/single-robotina-container.md`, `SECURITY.md` (R5, finalized in task 40).
@@ -656,19 +656,22 @@ inferred.
     `grep -rniE "sin credencial|no github credential|no tiene token|no esta instalado" SECURITY.md`
     (no output).
 
-- [ ] 40. **[measurement-dependent]** Add `SECURITY.md`'s measured evidence entries: R3's
+- [x] 40. **[measurement-dependent]** Add `SECURITY.md`'s measured evidence entries: R3's
   `CapEff`/`CapBnd` masks with the five-bit decode, R5's budget with the measured `pids_limit`
   and the recorded peak, SL2's nesting result (including the `9p`/`virtiofs` finding), and the
   observed behavior of the container start when the readiness gate fails. Files:
   `SECURITY.md`, `odd/tasks/single-robotina-container.md`. Depends on: tasks 24, 25, 26, 38,
   39.
+  - AMENDMENT (slice 11): the decode delivered is the **six-bit** `0xeb` (including
+    `CAP_KILL`); the "five-bit" wording above predates the task-28 §13.3 amendment and is kept
+    as history.
   - Verify: `grep -n "CapEff\|CapBnd" SECURITY.md` (non-empty);
     `grep -niE "mem_limit|6g|pids_limit" SECURITY.md` (non-empty);
     `grep -niE "9p|virtiofs|mount" SECURITY.md` (nesting result recorded);
     `docker compose exec robotina sh -c 'cat /sys/fs/cgroup/pids.max'` (matches the documented
     value).
 
-- [ ] 41. Finalize the change record: replace the ODD file's `## Verification evidence`
+- [x] 41. Finalize the change record: replace the ODD file's `## Verification evidence`
   placeholder with the collected evidence (base digest, measured versions, service list,
   nesting + capability + `pids` results, restart observations, the §19.4 auth result, the §19.5
   interpretation results) and add this change's progress entry.

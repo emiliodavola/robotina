@@ -156,6 +156,20 @@ Frozen by the user after the explore phase:
   (`testing.static_validation.note` and the `apply` rule). Both were reworded to refer to the bare
   form / the static-validation command by description; the re-run reports four hits, every one
   carrying `-q` or `--services` on the same line.
+- 2026-09-22: `sdd-apply` slice 11 (measurement evidence + stale-claim corrections) — **tasks 26,
+  38, 40, 41 closed**. Task 26 sampled the merged cgroup's `pids.current` at 1 Hz for 900 samples
+  with the concurrent worst case running (real OpenCode session exercising the six LSPs, R source
+  builds with `Ncpus=6`, `go build -a ./...` + `go vet`, `npm ci` + a parallel `node --test`, plus a
+  `basedpyright`/`r-languageserver` fork storm): baseline `52`, min `60`, median `329`, **peak
+  `478`**, `pids.max = 1024`. The **only** part not reproduced was a Telegram message burst (the
+  long-poll connection is live and counted; originating a burst needs a human or a real message).
+  Task 38 applied design §16's pre-committed rule: `478 ≤ 614` → **`pids_limit: 1024` confirmed**,
+  `compose.yml` untouched. Task 40 added `SECURITY.md`'s measured evidence (R3 six-bit `0xeb`
+  decode, R5 budget + peak, SL2 nesting, gate-failure behaviour) and folded in the 5.50 s/`ExitCode
+  0` stop. Task 41 wrote this record's consolidated evidence. Also corrected the stale lifecycle
+  claim in `README.md`/`README.en.md` (and their stale `CapBnd=0xcb`), and added the
+  MEASURED-CORRECTION note to `explore.md` leaving its findings verbatim. `compose.yml` was **not**
+  edited; no commit, push or PR was performed.
 
 ## Delivery plan (decided at sdd-tasks)
 - Strategy: **chained PRs**; chain strategy: **`feature-branch-chain`**.
@@ -181,12 +195,14 @@ Frozen by the user after the explore phase:
 | S7 docs | `feat/single-robotina-container-07-docs` | `fd016b3` | 726 (README pair 679) | committed; `scripts/fix-permissions.ps1` deleted (Q7) |
 | S8 records | `feat/single-robotina-container-08-records` | `ddbc0c2` | 968 (SECURITY.md 729) | committed (tasks 34–37, 39) |
 | S9 runtime verify | `feat/single-robotina-container-09-measurements` | — (uncommitted) | — | in progress: tasks 21, 22, 27 verified; **28 lifecycle proof FAILED** (see Slice 09) |
-| S9 measurement evidence | pending | — | — | pending (tasks 38, 40, 41; blocked on the task-26 peak and the task-28 decision) |
+| S10 capability fix | `feat/single-robotina-container-10-capkill` | committed | — | committed (task 28 closed: six capabilities, corrected lifecycle) |
+| S11 measurement evidence | `feat/single-robotina-container-11-evidence` | — (uncommitted) | — | **tasks 26, 38, 40, 41 closed**; stale lifecycle/`0xcb` claims corrected; out of scope: 42–45 |
 
-Task progress: **36/45** implementation tasks complete (12 through slice 04; +7 in slice 05:
+Task progress: **41/45** implementation tasks complete (12 through slice 04; +7 in slice 05:
 tasks 17–20, 23–25; +4 in slice 06: 13–16; +4 in slice 07: 29–32; +1 in slice 07: 33; +5 in slice
-08: 34–37, 39; +3 in slice 09: **21, 22, 27**). Task 28's single-lifecycle proof **failed** and stays
-open — see the Slice 09 section.
+08: 34–37, 39; +3 in slice 09: **21, 22, 27**; +1 in slice 10: **28**; +4 in slice 11: **26, 38, 40,
+41**). Remaining: **42–45** (the end-to-end suite, the egress/rollback checks and the final secret
+audit), reported but not started by slice 11.
 
 Verified so far without a live stack: `docker compose config -q`, `--services`,
 `docker compose build robotina` (exit 0), `docker build --check`, `s6-rc-compile` +
@@ -265,6 +281,73 @@ Forecast recorded by `sdd-tasks`: process artifacts 4,734 lines; implementation 
   decision pending at `sdd-tasks`.
 
 ## Verification evidence
+
+### Final collected evidence (slice 11 — 2026-09-22)
+
+Branch: `feat/single-robotina-container-11-evidence`. Stack live and healthy at capture: two
+containers `(healthy)`, ten s6 services, Telegram connected. This is the consolidated evidence
+`verify`/`archive` should read; the per-slice sections below keep their own raw output.
+
+**Vendor base digest** — the local `latest` tag still reports slice 02's digest, but the build that
+produced the running image resolved a newer one:
+
+```text
+$ docker inspect --format '{{index .RepoDigests 0}}' nousresearch/hermes-agent:latest
+nousresearch/hermes-agent@sha256:b2e3eeb0c550d262a5d713788ca079e682b9acfc4a0d02ec614bc847bd1087a9
+# image actually built (slice 03 build log) resolved:
+# nousresearch/hermes-agent@sha256:9403970a9c3c48c557e4afbde8b7c4aae4fd362cce293d550dc4f80f48842408
+$ docker inspect --format '{{index .RepoDigests 0}} {{.Id}}' robotina:local
+robotina@sha256:b51a742476e1a1dddf95d2393f59b88be5bac8bb92d1703fb2114393f13cabff
+```
+
+The tag floats by design (digest pinning is out of scope); the running image is
+`robotina:local` @ `sha256:b51a7424…`.
+
+**Service list** — exactly one agent container plus the proxy, PID 1 is the image entrypoint, ten
+s6 services:
+
+```text
+$ docker compose ps
+egress-proxy   Up … (healthy)
+robotina       Up … (healthy)
+$ docker compose exec robotina tr '\0' ' ' < /proc/1/cmdline
+s6-svscan -t0 /run/service          # PID 1 = the supervision tree, not tini/docker-init
+$ PATH=/command:$PATH s6-rc -a list
+s6rc-oneshot-runner dashboard engram main-hermes opencode opencode-init opencode-ready
+fix-attrs legacy-cont-init legacy-services        # 10
+```
+
+**Measured versions** (inside the running container): opencode `1.18.32`, gh `2.97.0`, jq `1.7`,
+ripgrep `14.1.1`, go `1.24.4`, taplo `0.10.0`, marksman `2026-02-08`, codegraph `1.5.0`, engram
+`1.20.0`, gentle-ai `3.1.0`, uv `0.11.6`, node `v26.5.1`, python3 `3.13.5`, R `4.5.0`.
+
+**Nesting (SL2/SL3):** two `ext4` mounts, neither `9p` nor `virtiofs`; the marker written inside
+the volume never appears in the host bind and survives `down`/`up`; volume count = 2. Raw output in
+§ Slice 05 and in `SECURITY.md` → «Evidencia medida».
+
+**Capabilities (R3, post-`CAP_KILL`):** uid-10000 `opencode serve` (pid 416) keeps
+`CapInh/Prm/Eff/Amb = 0x0`, `CapBnd = 0xeb`, `NoNewPrivs: 1`; PID 1 runs with `CapEff/CapBnd =
+0xeb`. `0xeb` = 235 = CHOWN+DAC_OVERRIDE+FOWNER+KILL+SETGID+SETUID. Decode in `SECURITY.md` R3.
+
+**`pids` (task 26/38):** baseline `52`/`1024`; over **900 samples at 1 Hz** with the concurrent
+worst case running, `min=60`, `median=329`, **`peak=478`**; `pids.max = 1024` (finite). Rule:
+`478 ≤ 614` → **1024 confirmed**, `compose.yml` untouched. Full workload list, and the one part that
+was **not** reproduced (a Telegram message burst), in `SECURITY.md` → «Evidencia medida».
+
+**Restart observations:** `docker compose stop robotina` = **5.50 s**, `ExitCode=0`, no SIGKILL;
+a `pkill` of `opencode serve` recovered in **≈4.4–5 s** with `reinicio #1 en 1s`; killing the gateway
+restarted it **in place** while `RestartCount=0` and `StartedAt=2026-09-22T19:26:33.780458019Z` stayed
+unchanged, i.e. the container did **not** cycle (corrected contract, slice 10).
+
+**§19.4 auth result:** plain probe → **HTTP 401**; credential-aware probe → **200**
+`{"healthy":true,"version":"1.18.32"}`; `ss -ltn` shows only `127.0.0.1:4096`.
+
+**§19.5 interpretation results:** host probe fails with exit 7 and `Get-NetTCPConnection
+-LocalPort 4096` = 0 listeners (no port, no false failure); `curl` without `-f` returns exit 0 on
+401, so auth is asserted on the **HTTP code**; `mountinfo` sources are VM-side paths and the skin
+mount is repo-sourced, not `HOST_DATA_DIR`-sourced; the SL3 engram read command is the one
+`scripts/export-state.sh` already uses; the in-container `robotina:4096` probe stays proxy-confounded
+and the unconfounded proof is the peer-container refusal. Detail in `SECURITY.md`.
 
 ### Baseline captured before the compose rewrite (tasks 1–3)
 
@@ -774,14 +857,19 @@ logs: "[Telegram] Connected to Telegram (polling mode)"
 
 ## Next step
 
-Runtime verification continues, with task 28 now **closed**. The task-28 defect was resolved in
-slice 10: `CAP_KILL` was added (six capabilities, bounding mask `0xeb`) and the lifecycle contract
-was corrected to "s6 supervises and restarts the gateway in place; the container exits when the
-supervision tree goes down". Remaining: 26 (peak `pids.current` under the concurrent worst case —
-needs the live worst-case workload), 38 (the `pids_limit` rule, gated on 26), 40 (the measured
-`SECURITY.md` evidence entries — it must now fold in the six-capability masks, the 5.50 s stop
-and the slice-09 gate-failure observation), 41 (finalize the change record) and the final
-verification/rollback/secret audit (42–45). `README.md`/`README.en.md` still carry the stale
-"container goes with the main program" claim and must be corrected before `verify`/`archive`.
-When those close, run `sdd-archive` (T9). Delivery (T10: branch pushed, PR opened) stays a
-separate user decision.
+Runtime verification for tasks 21, 22, 27 and 28 is complete (task 28 closed in slice 10), and
+slice 11 closed the measurement trail: **26** (peak `pids.current` = `478` under the concurrent worst
+case), **38** (`pids_limit: 1024` confirmed by the pre-committed rule; `compose.yml` untouched),
+**40** (`SECURITY.md` measured evidence, including the six-bit `0xeb` decode, the resource budget,
+the nesting result and the gate-failure behaviour) and **41** (this record's consolidated evidence).
+The stale lifecycle claim is corrected in both READMEs and annotated — not rewritten — in
+`explore.md`.
+
+Remaining: **42–45** — the end-to-end verification suite on the final tree, the frozen-egress and
+mandatory-input guard checks, the rollback-path check, and the final secret-leak audit. They were
+reported as out of scope in slice 11 and were **not** started. When they close, run `sdd-archive`
+(T9), with `sdd-verify` optional. Delivery (T10: branch pushed, PR opened) stays a separate user
+decision.
+
+Numeric prerequisite solved: the earlier "pending" markers for `pids`/nesting/capabilities in this
+file and in `SECURITY.md` are now resolved by measurement, not by estimate.

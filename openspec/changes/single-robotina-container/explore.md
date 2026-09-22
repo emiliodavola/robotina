@@ -17,6 +17,21 @@ Frozen user decisions (from the parent preflight, not re-litigated here):
 
 ---
 
+> **MEASURED CORRECTION (added at apply, slice 11 — 2026-09-22).** This is a historical
+> exploration record; every finding below is left verbatim so the record stays honest about
+> what was believed at the time. **One finding turned out false at apply.** The claim that the
+> container dies when the main program (Hermes) exits is **not** the measured contract:
+> `hermes gateway run` is the s6 service `gateway-default`, so s6 restarts it **in place** and
+> the container keeps running (`RestartCount` and `StartedAt` unchanged). The container exits
+> when the **s6 supervision tree** goes down, not when Hermes exits. Read every
+> "main program exits → container exits" sentence below through this note.
+>
+> Measured contract: `design.md` §13.3(b), `SECURITY.md` → "Apagado y ciclo de vida (medido)"
+> and R4, `README.md`/`README.en.md` → "un solo ciclo de vida". Spots affected by the stale
+> claim: §1.4, §3.2, §9 (R4), §12.
+
+---
+
 ## 0. Files read for this exploration
 
 | File | Why |
@@ -102,6 +117,7 @@ merge cheap (see §4).
   `main-wrapper.sh`, which exports `HOME=/opt/data`, `cd /opt/data`, activates
   `/opt/hermes/.venv`, then `s6-setuidgid hermes` before exec'ing the CMD. When the main
   program exits, the container exits.
+  > *(Historical claim — corrected at apply; see the MEASURED CORRECTION note at the top.)*
 - `dashboard/run` is a real longrun gated by `HERMES_DASHBOARD` (default off); it also
   exports `HOME=/opt/data`, `cd /opt/data`, activates the venv, then
   `exec s6-setuidgid hermes hermes dashboard ...`.
@@ -262,6 +278,9 @@ Proposed shape (design-level, not decided here):
 
 - The container still dies when the main program (Hermes) exits — opencode's lifetime is
   now coupled to Hermes'. Document it; it is inherent to the merge.
+  > *(Historical claim — corrected at apply: the gateway is an s6 service restarted in place;
+  > the container exits when the s6 supervision tree goes down. See the MEASURED CORRECTION
+  > note at the top.)*
 - "service up" ≠ "port listening": s6-rc considers the longrun up when the run script has
   been started. Add readiness (a `s6-notifyoncheck`/`notification-fd` check against
   `GET /global/health`, or a bounded wait in `opencode-init`) so Hermes' first loopback call
@@ -571,7 +590,7 @@ self-description (repo-editable) or the Telegram bot's display name (BotFather),
 | R1 | **The GitHub credential invariant is gone.** `GITHUB_TOKEN` + `gh` + the credential helper are now in the same container as the Telegram-facing agent. Prompt injection into the bot now reaches GitHub directly (read private repos, push), instead of being blocked at the delegation boundary. |
 | R2 | **Per-process key isolation is not enforceable.** Same uid, same container: `/proc/<pid>/environ`, `/proc/<pid>/fd` and any file the other process writes are reachable in principle. The acceptance criterion ("each process sees only its own key") is satisfiable; "neither can read the other's" is not. |
 | R3 | **Capabilities are per-container, not per-process.** Today opencode runs with pure `cap_drop: ALL`; after the merge the opencode process lives under `cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]`. Whether `s6-setuidgid` clears the effective set for uid 10000 must be **measured**, and if it does not, the run script should drop them explicitly (`capsh --drop=…` / `setpriv --bounding-set=-all`). Do not assume. |
-| R4 | **Single lifecycle.** A Hermes crash exits the container and takes opencode and engram with it; today they are independent failure domains. |
+| R4 | **Single lifecycle.** A Hermes crash exits the container and takes opencode and engram with it; today they are independent failure domains. *(See the MEASURED CORRECTION note at the top: a Hermes gateway crash does **not** exit the container — s6 restarts the service in place; the container exits when the supervision tree goes down.)* |
 | R5 | **Shared resource budget.** 2g + 4g and 2.0 + 4.0 CPUs must become one limit, and `pids_limit: 512` now covers Hermes + opencode + LSP children + engram + R/go builds. Re-forecast before design. |
 | R6 | The "isolation preserved" claim recorded in `odd/tasks/agent-interop-http.md` is retired. Say so explicitly rather than letting the two documents contradict each other. |
 
@@ -639,7 +658,8 @@ Squid allowlist untouched.
   feasibility hinges on a single unverified fact (OQ1: a glibc opencode build).
 - The vendor's `user2` bundle and `s6-rc.d` source tree are the natural supervision extension
   point; `opencode serve` becomes a longrun with `s6-setuidgid hermes`, and the container CMD
-  stays Hermes' main program.
+  stays Hermes' main program. *(Confirmed unchanged; the *lifecycle* consequence drawn from it
+  was wrong — see the MEASURED CORRECTION note at the top.)*
 - Keeping `HOME=/root` for the opencode service preserves every existing mount and avoids
   nested volumes entirely.
 - Two distinct keys are achievable; per-process isolation is **not**, and that must be
