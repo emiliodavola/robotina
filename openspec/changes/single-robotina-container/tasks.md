@@ -138,7 +138,7 @@ inferred.
 
 ## Phase 0 — Baseline and guardrails
 
-- [ ] 1. Capture the pre-change baseline for the change record: today's service inventory, the
+- [x] 1. Capture the pre-change baseline for the change record: today's service inventory, the
   running two-container PID-1 command lines, the mount list, and the two state volume names.
   Write the raw output into `odd/tasks/single-robotina-container.md` under
   `## Verification evidence`. Files: `odd/tasks/single-robotina-container.md`.
@@ -146,14 +146,14 @@ inferred.
     and `docker volume ls --format '{{.Name}}' | grep -cE '^robotina_(engram|opencode)_db$'`
     (expect `2`).
 
-- [ ] 2. Confirm the working branch, a clean tree and the secret-hygiene precondition.
+- [x] 2. Confirm the working branch, a clean tree and the secret-hygiene precondition.
   Files: none.
   - Verify: `git rev-parse --abbrev-ref HEAD` → `feat/single-robotina-container`;
     `git check-ignore -v .env` (non-empty); `git ls-files .env` (no output);
     `git grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=.+' -- ':!*.example'`
     (no output).
 
-- [ ] 3. Record the resolved vendor base image digest and the current measured tool versions
+- [x] 3. Record the resolved vendor base image digest and the current measured tool versions
   for the change record (design §2.5 — the digest is recorded at verification, digest pinning
   stays out of scope). Files: `odd/tasks/single-robotina-container.md`.
   - Verify: `docker inspect --format '{{index .RepoDigests 0}}' nousresearch/hermes-agent:latest`
@@ -161,7 +161,7 @@ inferred.
 
 ## Phase 1 — Compose: one agent service
 
-- [ ] 4. Rewrite `compose.yml` into one `robotina` service plus the untouched `egress-proxy`:
+- [x] 4. Rewrite `compose.yml` into one `robotina` service plus the untouched `egress-proxy`:
   `pids_limit` out of `x-hardening` and per-service (egress keeps its explicit `128`), the
   `NO_PROXY` / `no_proxy` entries swapped to `robotina`, both API keys under distinct names
   (design §10.1), the §7.1 mount table (nested `robotina_engram_db` / `robotina_opencode_db`

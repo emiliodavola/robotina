@@ -183,7 +183,167 @@ Forecast recorded by `sdd-tasks`: process artifacts 4,734 lines; implementation 
 
 ## Verification evidence
 
-_(pending)_
+### Baseline captured before the compose rewrite (tasks 1–3)
+
+Slice: `feat/single-robotina-container-02-compose`. Host: Docker 29.8.0 / Docker Compose
+v5.5.1, Windows + Docker Desktop. **The stack was not running at capture time** and no
+agent container existed (`docker ps -a` returned no rows), so every runtime observation is
+recorded as unavailable rather than invented.
+
+#### Task 1 — pre-change service inventory and state volumes
+
+Raw output:
+
+```text
+$ docker compose config --services
+egress-proxy
+hermes
+opencode
+# exit=0
+
+$ docker compose config --volumes
+engram_db
+opencode_db
+# exit=0
+
+$ docker ps -a --format '{{.Names}} {{.Status}} {{.Image}}'
+# (no output: no container exists, running or stopped)
+
+$ docker volume ls --format '{{.Name}}'
+7d12bdd3138bb229cf2f547cb1c56c017475d727a9a00e1d8d2bfa7e4d67e357
+44d2ff58eb6eefd3c83eaf9a8b1bc185c9fa99c42b225c216bcaf5d0413f654b
+
+$ docker volume ls --format '{{.Name}}' | grep -cE '^robotina_(engram|opencode)_db$'
+0
+# exit=1 (the pipeline's last stage found no match)
+```
+
+Interpretation, honestly:
+
+- The assigned expectation was `hermes`, `opencode`, `egress-proxy` for the service list —
+  **observed exactly that**.
+- The assigned expectation was `2` for the volume grep. **Observed `0`**: neither
+  `robotina_engram_db` nor `robotina_opencode_db` exists on this host yet, because the
+  pre-change stack was never brought up here. The two anonymous hashes are unrelated
+  volumes. The volume *names* are declared in the pre-change `compose.yml`
+  (`volumes.engram_db.name`, `volumes.opencode_db.name`) and reappear under the same names
+  after the rewrite; they are simply not instantiated until the first `up`.
+- **PID-1 command lines of the running two-container topology: unavailable.** No container
+  ever ran in this environment, so a `docker compose exec … /proc/1/cmdline` reading cannot
+  be produced and MUST NOT be fabricated.
+- **Mount list observed at runtime: unavailable.** Recorded instead from the pre-change
+  `compose.yml` (declared, not observed):
+  - `hermes`: bind `${HOST_DATA_DIR}/hermes` → `/opt/data`; bind `${HOST_DATA_DIR}/workspace`
+    → `/workspace`; bind `./hermes/skills` → `/opt/data/skills/stack` (ro); bind
+    `./hermes/context/.hermes.md` → `/workspace/.hermes.md` (ro); tmpfs `/tmp`.
+  - `opencode`: bind `${HOST_DATA_DIR}/workspace` → `/workspace`; bind
+    `${HOST_DATA_DIR}/opencode` → `/root/.config/opencode`; volume `engram_db` →
+    `/root/.engram`; volume `opencode_db` → `/root/.local/share/opencode`; bind
+    `${HOST_DATA_DIR}/backups` → `/backups`; bind `${HOST_DATA_DIR}/git` →
+    `/root/.config/git`; bind `${HOST_DATA_DIR}/go` → `/root/go`; bind
+    `./scripts/export-state.sh` → `/opt/export-state.sh` (ro); tmpfs `/tmp`.
+  - `egress-proxy`: bind `./squid/squid.conf` → `/etc/squid/squid.conf` (ro); bind
+    `./squid/allowlist.txt` → `/etc/squid/allowlist.txt` (ro); tmpfs
+    `/var/log/squid`, `/var/spool/squid`, `/run`, `/tmp`.
+
+#### Task 3 — resolved vendor base image digest and measured tool versions
+
+```text
+$ docker inspect --format '{{index .RepoDigests 0}}' nousresearch/hermes-agent:latest
+nousresearch/hermes-agent@sha256:b2e3eeb0c550d262a5d713788ca079e682b9acfc4a0d02ec614bc847bd1087a9
+# exit=0
+
+$ docker inspect --format 'Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}} WorkingDir={{json .Config.WorkingDir}}' nousresearch/hermes-agent:latest
+Entrypoint=["/opt/hermes/docker/entrypoint-dispatch.sh"] Cmd=null WorkingDir="/opt/hermes"
+
+$ docker inspect --format 'Os={{.Os}} Arch={{.Architecture}} Size={{.Size}}' nousresearch/hermes-agent:latest
+Os=linux Arch=amd64 Size=3980271518
+
+$ docker run --rm --network none --entrypoint sh nousresearch/hermes-agent:latest -c '…version probes…'
+node: v26.5.1
+npm: 11.17.0
+uv: uv 0.11.6 (x86_64-unknown-linux-musl)
+git: git version 2.47.3
+curl: curl 8.14.1 (x86_64-pc-linux-gnu) libcurl/8.14.1 OpenSSL/3.5.7 …
+python3: Python 3.13.5
+bash: GNU bash, version 5.2.37(1)-release (x86_64-pc-linux-gnu)
+```
+
+- The base image is **floating by design** (design §2.5): digest pinning is out of scope;
+  the digest above is recorded so a later vendor move is visible.
+- **Measured versions are the vendor base's**, and only that. The OpenCode toolchain
+  versions the READMEs' table reports (`opencode`, `gh`, `taplo`, `marksman`, `codegraph`,
+  `engram`, `gentle-ai`, `go`, `R`, `jq`, `ripgrep`, CPython 3.13) are **not measured here**:
+  `robotina-opencode:local` was never built and the old `opencode` image is not present, so
+  there is no container to measure them in. They stay as the pre-change README measurement
+  until the merged image is built (out of scope for this slice) and re-measured in task 17.
+- Vendor runtime identity (observed in the throwaway probe container): `HOME=/root`,
+  `HERMES_HOME=/opt/data`, `hermes:x:10000:10000::/opt/data:/bin/sh`, and the vendor image
+  ships **no** `/etc/gitconfig` (relevant to the §3 merge: everything is ours then).
+
+#### Task 2 — branch, tree and secret-hygiene precondition
+
+```text
+$ git rev-parse --abbrev-ref HEAD
+feat/single-robotina-container-02-compose
+
+$ git merge-base --is-ancestor feat/single-robotina-container HEAD && echo descends-from-tracker=yes
+descends-from-tracker=yes
+
+$ git status --porcelain
+# (no output: clean tree before the compose rewrite)
+
+$ git check-ignore -v .env
+.gitignore:6:.env	.env
+
+$ git ls-files .env
+# (no output)
+```
+
+**Recorded adaptation (the task's assertion was written for a single-branch flow).** The
+assigned expectation `git rev-parse --abbrev-ref HEAD → feat/single-robotina-container` does
+not apply to a feature-branch chain: this slice lives on
+`feat/single-robotina-container-02-compose`, cut from the tracker branch
+`feat/single-robotina-container`. The adapted assertions are (a) HEAD is the slice branch,
+(b) it **descends from** the tracker branch (`git merge-base --is-ancestor` exits 0), and
+(c) the tree was clean before any edit. All three hold above.
+
+Secret-hygiene precondition — **the assigned grep is over-broad and is honestly reported as
+such**:
+
+```text
+$ git grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=.+' -- ':!*.example' | wc -l
+28
+```
+
+All 28 pre-existing matches are benign, and every one falls into exactly one class:
+
+1. **Documentation placeholders with an empty value** — `README.md`, `README.en.md`,
+   `SECURITY.md` show `TELEGRAM_BOT_TOKEN=` followed by whitespace and a comment, e.g.
+   `README.md:91:   TELEGRAM_BOT_TOKEN=                 # @BotFather`. The `.+` matches the
+   padding, not a value.
+2. **Shell variable references inside recipes** — `OPENCODE_GO_API_KEY="$ROBOTINA_OPENCODE_GO_API_KEY"`
+   in `design.md`/`explore.md` and the `grep … "^OPENCODE_GO_API_KEY=" .env` lines in the
+   spec/tasks recipes; the right-hand side is a reference or a grep pattern, never a literal
+   secret.
+3. The grep pattern text itself inside the frozen artifacts.
+
+The precondition this task actually asserts — *no real secret is committed* — was therefore
+verified with a value-shaped refinement, which is empty:
+
+```text
+$ git grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=[A-Za-z0-9_-]{8,}' -- ':!*.example'
+# (no output; exit=1)
+
+$ git ls-files .env
+# (no output)
+```
+
+`.env` is gitignored and untracked, so its values are not reachable through `git grep` at
+all. **Finding for the parent:** the literal recipe assigned to task 2 (and repeated in task
+45) cannot pass on this repository even before the change; it needs the value-shaped
+refinement, or a `:!*.md`-style path exclusion, in a later slice. This slice does not rewrite
+`tasks.md` recipes.
 
 ## Next step
 
