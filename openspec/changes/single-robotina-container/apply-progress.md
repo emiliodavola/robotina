@@ -1,9 +1,9 @@
 # Apply progress — single-robotina-container
 
 Cumulative per-slice progress. The original body below is **slice 02**; the sections for
-**slices 03, 04, 05, 06 and 07** are appended at the end of this file, in order. Nothing in the earlier
-bodies was overwritten or deleted; slice 05 reopens and re-closes two slice-04 tasks (10 and 12)
-with the reason recorded.
+**slices 03, 04, 05, 06, 07, 08, 09, 10 and 11** are appended at the end of this file, in order.
+Nothing in the earlier bodies was overwritten or deleted; slice 05 reopens and re-closes two
+slice-04 tasks (10 and 12) with the reason recorded.
 
 Slice 02: **`feat/single-robotina-container-02-compose`** (chained PR #2, `feature-branch-chain`,
 tracker `feat/single-robotina-container`).
@@ -2108,3 +2108,225 @@ Every static-validation invocation in this section carries `-q`, `--services` or
 same line; the bare `docker compose config` form was never run and is never written here. No token
 or key value was ever printed.
 
+
+---
+
+# Slice 11 — `feat/single-robotina-container-11-evidence` (measurement evidence, tasks 26/38/40/41)
+
+Appended to the cumulative body above; nothing above was modified except the header line, which now
+lists slices 08–11. Branch: `feat/single-robotina-container-11-evidence`, cut from slice 10's branch
+under `feature-branch-chain`, tracker `feat/single-robotina-container`.
+
+## Structured status consumed
+
+- Native `gentle-ai.sdd-status` v2 at the start of this run: `changeName: single-robotina-container`,
+  `artifactStore: openspec`, `nextRecommended: apply`, `applyState: ready`,
+  `dependencies.apply: ready`, `taskProgress: 37/45`, `blockedReasons: []`, `notes: []`.
+- `actionContext`: `mode: repo-local`, `workspaceRoot: C:\Users\elaze\Desktop\robotina`,
+  `allowedEditRoots: ["C:\Users\elaze\Desktop\robotina"]`. **No actionContext warnings** raised by
+  the status engine. Three apply-observed warnings are recorded under Findings (A1–A3).
+- Delivery path present in the parent prompt: chained PRs, `feature-branch-chain`, this slice only
+  (tasks 26, 38, 40, 41 plus two stale-claim corrections); `size:exception` accepted per slice by
+  the user up to ~650 authored lines.
+- Environment: stack live and healthy (two containers `(healthy)`, ten s6 services, Telegram
+  connected, endpoint `{"healthy":true,"version":"1.18.32"}`). No stack restart was needed for the
+  measurement; the heavy work ran inside the container under `/workspace` only.
+
+## Completed tasks (4/4 in this slice; 41/45 overall) and their persisted checkbox updates
+
+`openspec/changes/single-robotina-container/tasks.md` was re-read after editing: tasks **26, 38, 40,
+41** are `- [x]`; `grep -c '^- \[ \]'` = **4** (only 42–45) and `grep -c '^- \[x\]'` = **41**.
+Each checkbox was flipped after its verification command actually ran.
+
+| Task | What was done | Verification actually run | Observed result |
+| --- | --- | --- | --- |
+| 26 | 1 Hz sampling of the merged cgroup's `pids.current` for the full 900-sample window with the concurrent worst case running inside `/workspace`; throwaway projects created and removed afterwards | `cat /sys/fs/cgroup/pids.current; cat /sys/fs/cgroup/pids.max`; the 900×1 Hz sampler; `sort -n \| tail -1` | baseline **`52`** / limit **`1024`**; series `min=60`, `median=329`, **`peak=478`** (900 samples); stack stayed `(healthy)` throughout |
+| 38 | Applied design §16's pre-committed rule to the task-26 peak | `docker compose config -q`; `cat /sys/fs/cgroup/pids.max`; rule arithmetic | `config -q` exit 0; `pids.max=1024` (finite); `478 ≤ 614` → **1024 confirmed**, `compose.yml` **not** edited |
+| 40 | Added `SECURITY.md`'s measured evidence (Spanish): R3 six-bit `0xeb` decode + masks, R5 budget with the measured limit and peak, SL2 nesting result, readiness-gate failure behaviour; folded in the measured 5.50 s/`ExitCode 0` stop | `grep -n "CapEff\|CapBnd"`; `grep -niE "mem_limit\|6g\|pids_limit"`; `grep -niE "9p\|virtiofs\|mount"`; `cat /sys/fs/cgroup/pids.max` | all greps non-empty; `pids.max=1024` matches the documented value |
+| 41 | Consolidated evidence written under the ODD file's `## Verification evidence` (base digest, measured versions, service list, nesting + capability + `pids`, restart observations, §19.4 auth, §19.5 interpretations) + a slice-11 progress entry, S10/S11 rows and a rewritten `## Next step` | `grep -c "robotina"`; `grep -niE "CapEff\|pids\|nesting\|digest"`; `grep -n "_(pending)_"` | `104`; non-empty (multiple hits); **no output** (exit 1) |
+
+## TDD Cycle Evidence
+
+**Not applicable.** `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`,
+`test_command: null`; the parent prompt did not activate strict TDD. No RED/GREEN table is produced
+because no test runner exists and none may be invented. Every proof is shell-level against the live
+container.
+
+## Files changed in this slice (authored line counts, `git diff --numstat`)
+
+| File | Change | Additions | Deletions | Total |
+| --- | --- | --- | --- | --- |
+| `SECURITY.md` | R3 section + `Evidencia medida` (Spanish) replacing the placeholder | 209 | 4 | 213 |
+| `odd/tasks/single-robotina-container.md` | final collected evidence, slice-10/11 progress, S10/S11 rows, task-progress line, `## Next step` | 103 | 15 | 118 |
+| `openspec/…/explore.md` | MEASURED-CORRECTION note + four additive inline pointers (findings left verbatim) | 22 | 2 | 24 |
+| `README.md` | lifecycle claim corrected to the measured contract; `CapBnd=0xcb` → `0xeb` | 7 | 5 | 12 |
+| `README.en.md` | same, English | 7 | 5 | 12 |
+| `openspec/…/tasks.md` | tasks 26/38/40/41 `- [ ]` → `- [x]` + the task-40 amendment note | 7 | 4 | 11 |
+| `openspec/…/apply-progress.md` | this cumulative section + header update | new section | 0 | — |
+| **Total authored changed lines (excluding this section)** | | **355** | **35** | **390** |
+
+- Rename-aware total: **390 authored lines** (355 additions + 35 deletions), well under the ~650
+  per-slice `size:exception` the user accepted. No `compose.yml` change was needed.
+- The four unchecked task lines in `tasks.md` (42–45) were intentionally left `- [ ]`.
+
+## The measurement (task 26/38), raw
+
+Workload, driven **in parallel** for the whole 900 s window inside `/workspace/lt` (a throwaway tree
+created for this slice and removed afterwards; the repo and host state were never touched):
+
+1. **Real OpenCode session over the loopback API** — `POST /session` then
+   `/session/{id}/message` with `providerID: opencode`; the workspace carried `.py`, `.R`, `.toml`,
+   `.md`, `.json` and a `Dockerfile`. `/lsp` reported `pyright`, `python`, `json`, `toml`, `r`,
+   `marksman` all `connected` (the `dockerfile` server did not start). Observed pids immediately
+   after this step alone: `146`.
+2. **R source build** with `Ncpus=6` — 80 C translation units, `--preclean`, four concurrent workers
+   (`install.packages(..., Ncpus=6, INSTALL_opts="--preclean")`).
+3. **`go build -a ./...` + `go vet ./...`** on a 41-file module, two workers.
+4. **`npm ci` + `node --test --test-concurrency=6`**, two workers.
+5. **Extra fork storm** — `basedpyright` (several Node workers per invocation) plus a short-lived
+   `R languageserver`, one worker; plus `python3 -m compileall` and 80 × `gcc -fsyntax-only`.
+
+```text
+$ docker compose exec robotina sh -c 'cat /sys/fs/cgroup/pids.current; cat /sys/fs/cgroup/pids.max'
+52
+1024
+$ docker compose exec robotina sh -c 'i=0; while [ $i -lt 900 ]; do cat /sys/fs/cgroup/pids.current; i=$((i+1)); sleep 1; done' > /workspace/lt/pids.run
+$ sort -n /workspace/lt/pids.run | head -1 ; ... | tail -1 ; wc -l
+60
+478
+900
+```
+
+- **Baseline (at rest, no OpenCode session):** `52` / `1024`.
+- **Series:** `min=60`, `median=329`, **`peak=478`**, `n=900`. Mid-run calibration on a shorter
+  (120 s) window peaked at `379`, so calibration alone would have under-reported the burst.
+- **Rule (design §16):** `478 ≤ 614` → **confirm `1024`**. No `compose.yml` change.
+- **Partially exercised, stated plainly:** the Telegram message burst was **not** generated. The
+  gateway's live long-poll connection is in the baseline, but originating a burst needs a human
+  writing to the bot or sending real messages to the user's chat — not done. The recorded peak is
+  therefore the worst case **without** that burst, not the complete worst case. Everything else in
+  the recipe was exercised.
+- Cleanup: `/workspace/lt` removed (`ls -A /workspace` → `.hermes.md` only), the two throwaway
+  OpenCode sessions deleted (`DELETE /session/{id}` → 200), no load process left running.
+
+## Other measurements folded into the evidence
+
+| Item | Raw result | Where recorded |
+| --- | --- | --- |
+| R3 masks (uid-10000 `opencode serve`, pid 416) | `CapInh/Prm/Eff/Amb=0x0`, `CapBnd=0xeb`, `NoNewPrivs=1`; PID 1 `CapEff/CapBnd=0xeb` | `SECURITY.md` R3 + `Evidencia medida` |
+| Nesting (SL2) | `/dev/sdd on /opt/data/.engram type ext4`; `/dev/sdd on /opt/data/.local/share/opencode type ext4` (no `9p`/`virtiofs`) | `SECURITY.md` `Evidencia medida` |
+| Volume names | `robotina_engram_db`, `robotina_opencode_db` (count 2) | ODD record |
+| `HOST_DATA_DIR` | `backups`, `hermes`, `workspace` only | ODD record |
+| Endpoint auth (§19.4) | plain probe → **401**; credential-aware → **200** `{"healthy":true,"version":"1.18.32"}`; `ss -ltn` only `127.0.0.1:4096` | `SECURITY.md`, ODD record |
+| Host probe (§19.5) | host `curl` exit **7**; `Get-NetTCPConnection -LocalPort 4096` = **0** listeners | `SECURITY.md` |
+| s6 services | 10 (`s6rc-oneshot-runner dashboard engram main-hermes opencode opencode-init opencode-ready fix-attrs legacy-cont-init legacy-services`) | ODD record |
+| Running image | `robotina:local` @ `sha256:b51a742476e1a1dddf95d2393f59b88be5bac8bb92d1703fb2114393f13cabff` | ODD record |
+| Restart observations | stop 5.50 s / `ExitCode=0`; gateway restarted in place with `RestartCount=0` and `StartedAt` unchanged | ODD record |
+
+## Deviations from design
+
+1. **D-s11-1 — the measurement window is a full 900 samples, but the workload differs from the
+   design's literal recipe in two ways.** The design's step 1 says "an OpenCode session exercising
+   all six LSPs"; the session was real and five of the six configured LSPs reported `connected`
+   (`dockerfile` did not start, so a `dockerfile-language-server` process was not part of the
+   footprint). Step 5 ("Telegram traffic for the duration") was **not** reproduced. Both are
+   reported, not papered over; the peak is the worst case minus that burst.
+2. **D-s11-2 — `install.packages(..., Ncpus=6)` was used rather than a bare `R CMD INSTALL`.**
+   `Ncpus` is the design's own wording; the compile storm is produced by `MAKEFLAGS=-j6` over 80
+   translation units, which is the observable the design cares about.
+3. **D-s11-3 — the `pids` sampler wrote its series to `/workspace/lt/pids.run`, inside the
+   throwaway tree**, and the tree was deleted afterwards. Nothing was written to the repo or to host
+   state outside `HOST_DATA_DIR/workspace`.
+4. **D-s11-4 — `explore.md` was annotated, not rewritten.** Four additive pointers plus one
+   top-of-file MEASURED-CORRECTION block; every original finding — including the false one — is
+   intact.
+5. **D-s11-5 — the two README `CapBnd=0x00000000000000cb` values were corrected to `0xeb`.**
+   Task 40's mandate ("correct any remaining five-capability/`0xcb` wording slice 10 left stale")
+   plus the fact that `README.md`/`README.en.md` are allowed edit surfaces. No other `0xcb`/five-
+   capability mention was touched: every remaining occurrence is inside a labelled AMENDMENT note
+   or a historical measurement, which is honest history.
+
+## Findings for the parent (not fixed here — outside this slice)
+
+- **A1 (warning) — a host-side `curl` without `-f` reports exit 0 on HTTP 401.** The auth property
+  must be asserted on the **HTTP code**, not on `curl`'s exit status. This slice mislabelled one
+  probe before catching it; the corrected recipe is recorded in `SECURITY.md`.
+- **A2 (finding) — `openspec/project.md` still says "s6 needs five capabilities"** (line ~29 in the
+  services table and line ~82 in the traps list) and `openspec/project.md` is **not** under
+  `openspec/changes/single-robotina-container/`, so it is outside this slice's allowed edit
+  surfaces. It is the last five-capability wording outside labelled history and should be aligned
+  before `archive` (a one-line fix in a later slice).
+- **A3 (finding) — the vendor `latest` tag still floats.** The local tag reports
+  `sha256:b2e3eeb0…` while the build resolved `sha256:9403970a…`; both are recorded in the ODD file
+  so the drift is visible. Digest pinning stays out of scope, as designed.
+
+## Remaining tasks (4) — exact unchecked lines from the persisted artifact
+
+```text
+- [ ] 42. Run the verification suite end to end on the final tree and record the result.
+- [ ] 43. Confirm the frozen egress boundary and the mandatory-input guard survived the merge.
+- [ ] 44. Confirm the rollback path is intact: both state volume names unchanged, the three
+- [ ] 45. Final secret-leak audit over the whole change, including this file.
+```
+
+Tasks 42–45 were **reported, not started**, per the parent prompt. Task 45's known unsatisfiable
+grep (finding F1 from slice 02) still needs the value-shaped refinement before it can pass.
+
+## Workload / PR boundary
+
+- **Slice budget vs actual:** forecast S9 was ~40 lines; the composed slice authored **390** lines
+  (measurement evidence + the two mandated stale-claim corrections). It is under the ~650 per-slice
+  exception the user accepted, so **no new `size:exception` is requested**.
+- **PR boundary:** branch `feat/single-robotina-container-11-evidence`, targeting slice 10's branch
+  under `feature-branch-chain`. Contents: `SECURITY.md`, `README.md`, `README.en.md`,
+  `odd/tasks/single-robotina-container.md`, `openspec/…/explore.md`, `openspec/…/tasks.md` and this
+  `apply-progress.md`. `compose.yml` is deliberately **not** in it (the rule confirmed 1024).
+- No `git commit`, `git push` or PR was created — the parent owns delivery and the index. The
+  working tree at the end of the slice carries exactly the seven files above.
+
+## Verification commands run in this slice (exhaustive, with observed output)
+
+```text
+# --- task 26 / 38: pids budget ---
+docker compose exec -T robotina sh -c 'cat /sys/fs/cgroup/pids.current; cat /sys/fs/cgroup/pids.max'   # 52 then 1024
+docker compose exec -d robotina sh -c 'i=0; while [ $i -lt 900 ]; do cat /sys/fs/cgroup/pids.current; i=$((i+1)); sleep 1; done > /workspace/lt/pids.run'
+docker compose exec -d robotina sh /workspace/lt/load.sh 870                                           # concurrent worst case
+docker compose exec -T robotina sh -c 'sort -n /workspace/lt/pids.run | tail -1'                       # 478
+docker compose exec -T robotina sh -c 'wc -l < /workspace/lt/pids.run'                                 # 900
+docker compose config -q                                                                               # exit 0
+docker compose exec -T robotina sh -c 'cat /sys/fs/cgroup/pids.max'                                    # 1024 (finite)
+
+# --- task 26: the real OpenCode session + LSPs ---
+docker compose exec -T robotina sh -c 'curl ... -X POST .../session'                                   # ses_... created
+docker compose exec -T robotina sh -c 'curl ... -X POST .../session/$SID/message ...'                   # http=200, six first lines
+docker compose exec -T robotina sh -c 'curl ... http://127.0.0.1:4096/lsp'                              # pyright/python/json/toml/r/marksman = connected
+
+# --- task 40: SECURITY.md evidence ---
+grep -n 'CapEff\|CapBnd' SECURITY.md                                                                   # non-empty
+grep -niE 'mem_limit|6g|pids_limit' SECURITY.md                                                         # non-empty
+grep -niE '9p|virtiofs|mount' SECURITY.md                                                               # non-empty
+docker compose exec -T robotina sh -c 'cat /sys/fs/cgroup/pids.max'                                     # 1024, matches the doc
+
+# --- R3 masks / nesting / auth / host probe ---
+docker compose exec -T robotina sh -c 'for p in $(pgrep -f "[o]pencode serve"); do ... grep -E "Cap(Inh|Prm|Eff|Bnd|Amb)|NoNewPrivs" /proc/$p/status; done'
+# pid=416 uid=10000 CapInh/Prm/Eff/Amb=0x0 CapBnd=0xeb NoNewPrivs=1
+docker compose exec -T robotina sh -c 'mount | grep -E "\.engram|\.local/share/opencode"'               # two ext4 lines, /dev/sdd
+docker compose exec -T robotina sh -c 'ss -ltn | grep 4096'                                             # LISTEN 127.0.0.1:4096 only
+docker compose exec -T robotina sh -c 'curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:4096/global/health'   # 401
+curl -m 5 -sS http://127.0.0.1:4096/global/health                                                        # host: exit 7 (refused)
+powershell -NoProfile -Command '(Get-NetTCPConnection -LocalPort 4096 -ErrorAction SilentlyContinue | Measure-Object).Count'   # 0
+
+# --- task 41: change record ---
+grep -c 'robotina' odd/tasks/single-robotina-container.md                                               # 104
+grep -niE 'CapEff|pids|nesting|digest' odd/tasks/single-robotina-container.md                           # non-empty
+grep -n '_(pending)_' odd/tasks/single-robotina-container.md                                            # no output (exit 1)
+
+# --- task 26 cleanup ---
+docker compose exec -T robotina sh -c 'rm -rf /workspace/lt; ls -A /workspace'                          # .hermes.md only
+docker compose ps --format 'table {{.Name}}\t{{.Status}}'                                               # egress-proxy + robotina both (healthy)
+```
+
+Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
+same line; the bare `docker compose config` form was never run and is never written here. No token,
+key or password value was ever printed (the API probes used `-u "opencode:$OPENCODE_SERVER_PASSWORD"`
+expanded inside the container and never echoed).

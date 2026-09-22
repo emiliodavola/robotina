@@ -298,7 +298,7 @@ un reset de fábrica de Docker Desktop las borra. Los JSON sí sobreviven.
 
 **Las pruebas numéricas de esta documentación asumen el uid por defecto.** El
 usuario `hermes` de la imagen es uid 10000, y las recetas que imprimen
-`10000:10000`, `CapBnd=0x00000000000000cb` o `pids.max=1024` valen para esa
+`10000:10000`, `CapBnd=0x00000000000000eb` o `pids.max=1024` valen para esa
 configuración. Un `HERMES_UID` distinto las invalida sin invalidar el diseño.
 
 ## Versiones
@@ -341,10 +341,12 @@ más filoso es que los secretos son variables de entorno, legibles con
 
 ## Decisiones deliberadas
 
-- **Un solo ciclo de vida.** Al ser un contenedor, si Hermes cae, s6 lo
-  reinicia; si el programa principal baja, el contenedor va con él, y
-  `opencode` y `engram` no sobreviven por su cuenta. Es la regresión aceptada
-  del merge (R4 en `SECURITY.md`).
+- **Un solo ciclo de vida, y es el del contenedor.** El gateway de Hermes es un
+  servicio de s6 (`gateway-default`): si cae, s6 lo reinicia **en el lugar** y el
+  contenedor sigue arriba, con `RestartCount` y `StartedAt` sin cambios. Lo
+  compartido es el ciclo de vida del contenedor: sale cuando baja el **árbol de
+  supervisión de s6**, no cuando sale Hermes, y `opencode` y `engram` se van con
+  él. Es la regresión aceptada del merge (R4 en `SECURITY.md`).
 - **Un solo uid para todo el árbol (10000).** El aislamiento de claves por
   proceso no es exigible a igual uid; lo que sí se exige es que cada proceso se
   configure **solo con su propia clave**, y el arranque lo verifica (R2).
