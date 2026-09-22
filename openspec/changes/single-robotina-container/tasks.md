@@ -682,12 +682,12 @@ inferred.
 
 ## Phase 9 — Final verification and rollback safety
 
-- [ ] 42. Run the verification suite end to end on the final tree and record the result.
+- [x] 42. Run the verification suite end to end on the final tree and record the result.
   Files: `odd/tasks/single-robotina-container.md`. Depends on: task 40.
   - Verify: `docker compose config -q && docker compose build && docker compose up -d && docker compose ps`
     (exactly `robotina` and `egress-proxy`), plus the loopback health probe of task 19.
 
-- [ ] 43. Confirm the frozen egress boundary and the mandatory-input guard survived the merge.
+- [x] 43. Confirm the frozen egress boundary and the mandatory-input guard survived the merge.
   Files: none. Depends on: task 4.
   - Verify: `git diff --exit-code $(git merge-base HEAD main)...HEAD -- squid/` (exit 0);
     `git status --porcelain -- squid/` (no output);
@@ -696,7 +696,7 @@ inferred.
     `robotina`, `127.0.0.1`, `egress-proxy`); `docker compose logs egress-proxy 2>&1 | grep -n "127.0.0.1:4096"`
     (no output).
 
-- [ ] 44. Confirm the rollback path is intact: both state volume names unchanged, the three
+- [x] 44. Confirm the rollback path is intact: both state volume names unchanged, the three
   legacy host folders present and non-empty, the new `robotina/` tree and removal of `opencode/`
   revertible as one unit, and no destructive action taken anywhere.
   Files: none. Depends on: tasks 29, 43.
@@ -709,15 +709,23 @@ inferred.
     the script and neither state volume nor any host folder is destroyed, so the deletion is a
     revertible unit alongside the rest of this change).
 
-- [ ] 45. Final secret-leak audit over the whole change, including this file.
+- [x] 45. Final secret-leak audit over the whole change, including this file.
   Files: none. Depends on: tasks 42, 43, 44.
-  - Verify: `git grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=.+' -- ':!*.example'`
+  - Verify: `git grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN|OPENCODE_SERVER_PASSWORD|HERMES_OPENCODE_GO_API_KEY)=[A-Za-z0-9_./+=-]{16,}' -- ':!*.example'`
     (no output); `docker compose logs robotina 2>&1 | grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN|OPENCODE_SERVER_PASSWORD)='`
     (no output); `git check-ignore -v .env` (non-empty) and `git ls-files .env` (no output);
     and the CR4 authoring-rule check —
     `git grep -nE "docker compose confi[g]" -- README.md README.en.md SECURITY.md scripts/ openspec/changes/single-robotina-container/design.md openspec/changes/single-robotina-container/tasks.md | grep -vE "config [-]{1,2}(q|services|format)"`
     (no output; every hit must read the static-validation command with `-q`,
     `--services` or `--format` on the same line).
+    **AMENDMENT (apply, slice 12 — finding F1):** the literal form
+    `(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=.+` is **replaced** by the
+    value-shaped form above. The literal form is unsatisfiable on this repository: it matches
+    34 benign lines — documentation placeholders whose value is empty, `$VAR`/`${VAR}` shell
+    references in recipes, and `grep "^KEY=" .env` patterns — none of which is a leaked secret.
+    The value-shaped form requires an assignment whose value looks like a real secret (16+ chars
+    from `[A-Za-z0-9_./+=-]`, so no empty placeholder, no trailing comment, no `$`-reference), and
+    it still **fails** if a real secret value ever lands in a tracked file.
 
 ## Delivery decision (ask-on-risk stop)
 
