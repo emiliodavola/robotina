@@ -1755,3 +1755,176 @@ git grep -nE "docker compose confi[g]" -- README.md README.en.md SECURITY.md scr
 Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
 same line; the bare `docker compose config` form was never run and is never written here. No token
 or key value was ever printed.
+
+---
+
+# Slice 09 — `feat/single-robotina-container-09-measurements` (runtime verification, tasks 21, 22, 27, 28)
+
+Appended to the cumulative body above. Nothing above was modified. This slice is **verification
+only** — no production code changed; the deliverable is the runtime evidence plus the persisted
+task checkboxes.
+
+## Structured status consumed
+
+- Native `gentle-ai.sdd-status` v2 provided by the parent: `changeName: single-robotina-container`,
+  `artifactStore: openspec`, `nextRecommended: apply`, `applyState: ready`, `dependencies.apply:
+  ready`, `taskProgress: 33/45 complete, 12 pending`, `blockedReasons: []`, `notes: []`.
+- `actionContext`: `mode: repo-local`, `workspaceRoot: C:\Users\elaze\Desktop\robotina`,
+  `allowedEditRoots: ["C:\Users\elaze\Desktop\robotina"]`. **No actionContext warnings** raised by
+  the status engine; the three apply-observed findings (F1–F3) are recorded below.
+- Review-workload gate: the parent prompt carries the resolved delivery path — chained PRs,
+  `feature-branch-chain`, tracker `feat/single-robotina-container`, current slice branch
+  `feat/single-robotina-container-09-measurements`, `exception-ok` accepted per slice (~650 authored
+  lines, user decision). This slice implements tasks **21, 22, 27, 28 only**; heavy-load sampling
+  (26) and the measured evidence entries (38, 40, 41) were deliberately excluded.
+- `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`, `test_command: null`; the
+  parent prompt did not activate strict TDD.
+- No child subagent was launched. No `git commit`/`git push`/PR was performed — the parent owns the
+  index and delivery. No token or key value was ever printed; key-touching probes used `sha256sum`
+  only. The stack was left **healthy and running** (explicitly required).
+
+## Completed tasks (36/45 cumulative, 3/4 of this slice) and their persisted checkbox updates
+
+`openspec/changes/single-robotina-container/tasks.md` was re-read after editing: **36 checked**
+(`grep -c '^- \[x\]'`), **9 pending** (`grep -c '^- \[ \]'`). Tasks 21, 22 and 27 were flipped only
+after their verification commands actually ran and were observed. **Task 28 stays `- [ ]`** — its
+s6-recovery half passed but its amended single-lifecycle proof failed.
+
+| Task | What was done | Verification actually run | Observed result |
+| --- | --- | --- | --- |
+| 21 | Readiness gate across 3 `down`/`up` cycles + the `ECONNREFUSED` log check + the gate-failure behaviour | the exact 3-cycle loop; the `--since 10m` refused/econnrefused grep; an isolated throwaway container with `opencode-ready/up` = `/bin/false`; the real `/run/s6/basedir/scripts/rc.init` | all 3 cycles `probe_exit=0`, gate satisfied at `intentos=1`; cold starts ≈4.34 / 4.56 / 4.44 s; refused-econnrefused grep **no output**; **gate failure → s6-overlay continues to the CMD** (`s6-rc: warning: unable to start service opencode-ready: command exited 1` then the CMD ran), `S6_BEHAVIOUR_IF_STAGE2_FAILS` unset |
+| 22 | Identity layers ID1/ID2/ID3/ID5 and state ownership SL6, live + fresh-tree | the 8 live probes; `docker compose -p robotina-fresh config -q`; the literal `up` (collides); the renamed-container fresh run + inspect + cont-init log | skin present and `ro` (repo source); `touch` → `Read-only file system`; `skin: robotina` (1965); `.hermes.md` count `3`; `NO_PROXY` has `robotina`; write test `writable-as-10000`; `stat` `10000:10000`; fresh run selects the skin non-interactively and is writable as 10000 |
+| 27 | `opencode-init` idempotency, invalid-JSON quarantine, log observability | `sha256sum` before/after `restart`; seed invalid JSON + restart + `jq -e .` + endpoint; `docker compose logs --tail 200` | hashes identical (`55e23123…8149`, `IDEMPOTENT=yes`); `cuarentenado en …/opencode.json.invalid-20260922T190450Z`; container healthy; resulting JSON valid; 200 log lines incl. both service banners |
+| 28 (partial) | s6 recovery **verified**; single-lifecycle amended proof attempted | `pkill -f "[o]pencode serve"` (as uid 10000) + bounded probe; `pkill -f "[h]ermes gateway"` (root → EPERM, then uid 10000); rc.init-child kill; 180 s RestartCount/StartedAt watch | recovery in **5 s**, pid 227→533, `reinicio #1 en 1s`; gateway kill → s6 restarts it in place (`gateway-default`, 612→919), `RestartCount=0`, `StartedAt` unchanged; killing the real main program (`sleep infinity`) starts the shutdown but it **wedges** (no `CAP_KILL`), container never exits |
+
+## TDD Cycle Evidence
+
+**Not applicable.** `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`,
+`test_command: null`; the parent prompt did not activate strict TDD. Verification is the shell-level
+runtime suite above; no test runner exists and none may be invented.
+
+## Files changed in this slice (authored line counts)
+
+| File | Change | Additions | Deletions |
+| --- | --- | --- | --- |
+| `odd/tasks/single-robotina-container.md` | Slice 09 evidence + slice-progress/status table + `## Next step` | see `git diff --numstat` | — |
+| `openspec/changes/single-robotina-container/tasks.md` | tasks 21/22/27 `- [ ]` → `- [x]` + slice-09 note | 3 flips + note | 0 |
+| `openspec/changes/single-robotina-container/apply-progress.md` | this cumulative section | new section | 0 |
+
+- **Implementation-only authored changed lines: 0** (verification slice; no `compose.yml` /
+  `robotina/` / `hermes/` change). The delta is the process record only, which is inside the
+  accepted per-slice `size:exception`. Nothing was compressed or deleted to fit the budget.
+- `git status --porcelain` for the slice: ` M odd/tasks/single-robotina-container.md`,
+  ` M openspec/changes/single-robotina-container/tasks.md`,
+  ` M openspec/changes/single-robotina-container/apply-progress.md`.
+
+## Deviations from task text / design
+
+1. **Task 28's kill had to run as uid 10000, not root.** The literal `docker compose exec robotina
+   sh -c 'pkill …'` runs as root, and the container drops `CAP_KILL` (`CapEff=0x00000000000000cb`),
+   so root gets `EPERM`. The kill was realized with `docker compose exec -u hermes …`. The `AC5`
+   scenario text should either use `-u hermes`/`s6-svc` or note the capability constraint.
+2. **Task 21's gate-failure observation used an isolated throwaway container, not the live stack.**
+   The real gate would have had to time out for its full 120 s bound; forcing the same oneshot to
+   exit non-zero immediately (`/bin/false` as its `up`) produced the identical failure signal
+   (non-zero oneshot exit) inside the session and left the live stack untouched.
+3. **Task 22's literal fresh-project command cannot pass on this host.** `container_name: robotina`
+   (AC2) makes `docker compose -p robotina-fresh up -d robotina` collide with the live container.
+   The observable was proven with the same compose file plus a renaming/isolating override. The
+   spec's “isolated project name” CAUTION assumed the container name followed the project.
+4. **No `specs/` edit was made** (outside this session's allowed surfaces); the two spec
+   clarifications that this slice surfaces (task-28 kill user, task-22 fresh command) are reported
+   for `sdd-verify` rather than edited.
+
+## Findings for the parent (not fixed here)
+
+- **F1 — the amended single-lifecycle proof fails; the s6 recoverability and the container lifecycle
+  are two different things.** `hermes gateway` is the s6 service `gateway-default`, so killing it
+  can never cycle the container. The main program (`rc.init` child) is a separate `sleep infinity`,
+  and killing it wedges the shutdown because the root s6 supervisors have no `CAP_KILL` to stop the
+  uid-10000 services. **AC8's “container goes down and comes back as one unit” is not satisfied.**
+  Needs a decision: add `CAP_KILL`, make the supervised gateway the main program, or re-word AC8 to
+  the guarantee the architecture actually provides.
+- **F2 — the same missing `CAP_KILL` makes an in-container `docker stop`-style shutdown non-graceful.**
+  Task 21's `docker compose down` cycles still succeeded, but each one relies on Docker's stop grace
+  + SIGKILL from the host; the s6 tree's own bring-down cannot stop the uid-10000 children. This is
+  worth noting in `SECURITY.md`/the README operator notes.
+- **F3 — `s6-svstat`/`CAP_KILL` detail for task 40:** the observed gate-failure behaviour is “s6-overlay
+  continues to the CMD” (degraded start), which design D-6 required to be recorded explicitly if
+  observed. Task 40 should fold this in together with the measured capabilities.
+
+## Remaining tasks (9) — exact unchecked lines from the persisted artifact
+
+```text
+- [ ] 26. **[measurement-dependent]** Sample the merged cgroup's `pids.current` baseline and
+- [ ] 28. Verify s6 recovery and the single-lifecycle property (AC5, AC8 amended proof).
+- [ ] 38. **[measurement-dependent]** Apply design §16's pre-committed adjustment rule to the
+- [ ] 40. **[measurement-dependent]** Add `SECURITY.md`'s measured evidence entries: R3's
+- [ ] 41. Finalize the change record: replace the ODD file's `## Verification evidence`
+- [ ] 42. Run the verification suite end to end on the final tree and record the result.
+- [ ] 43. Confirm the frozen egress boundary and the mandatory-input guard survived the merge.
+- [ ] 44. Confirm the rollback path is intact: both state volume names unchanged, the three
+- [ ] 45. Final secret-leak audit over the whole change, including this file.
+```
+
+## Workload / PR boundary
+
+- **Slice budget:** implementation delta **0 authored code lines**; the process record is the whole
+  delta and stays inside the accepted per-slice `size:exception`. No re-slicing needed.
+- **PR boundary:** this slice contains exactly `odd/tasks/single-robotina-container.md`,
+  `openspec/changes/single-robotina-container/tasks.md` (tasks 21/22/27 + the slice-09 note) and this
+  `apply-progress.md`, on branch `feat/single-robotina-container-09-measurements`. Targeted at the
+  tracker branch `feat/single-robotina-container` under `feature-branch-chain`. The measurement
+  slice (26, 38, 40, 41) and the final audit (42–45) are **not** started.
+- No `git commit`, `git push` or PR was created — the parent owns delivery and the index.
+
+## Verification commands run in this slice (exhaustive, with observed output)
+
+```text
+# --- task 22, live ---
+docker compose exec -T robotina sh -c 'ls -l /opt/data/skins/robotina.yaml'          # -rwxrwxrwx root root 1059
+docker compose exec -T robotina sh -c 'touch /opt/data/skins/robotina.yaml'          # Read-only file system (exit 1)
+docker compose exec -T robotina sh -c 'grep " /opt/data/skins" /proc/self/mountinfo' # repo source, ro
+docker compose exec -T robotina sh -c 'grep -niE "skin" /opt/data/config.yaml'       # 1965: skin: robotina
+docker compose exec -T robotina sh -c 'grep -c "robotina" /workspace/.hermes.md'     # 3
+docker compose exec -T robotina sh -c 'printenv NO_PROXY'                            # ...robotina,egress-proxy
+docker compose exec -T robotina sh -c 'PATH=/command:$PATH s6-setuidgid hermes sh -c "touch /opt/data/.write-test && rm /opt/data/.write-test" && echo writable-as-10000'   # writable-as-10000
+docker compose exec -T robotina sh -c 'stat -c "%u:%g" /opt/data'                    # 10000:10000
+# --- task 22, fresh project ---
+docker compose -p robotina-fresh config -q                                            # exit 0
+docker compose -p robotina-fresh up -d robotina                                       # conflict: /robotina in use
+docker compose -p robotina-fresh -f compose.yml -f <override> up -d robotina          # fresh robotina-fresh started
+docker inspect --format '{{range .Mounts}}…' robotina-fresh                           # fresh sources; vol paths are fresh binds
+docker compose -p robotina-fresh … logs robotina | grep 'display.skin'                # Set display.skin = robotina; exited 0
+docker rm -f robotina-fresh                                                           # cleanup
+# --- task 27 ---
+docker compose exec -T robotina sha256sum /opt/data/.config/opencode/opencode.json    # 55e23123…8149
+docker compose restart robotina                                                       # oneshot re-runs
+docker compose exec -T robotina sha256sum /opt/data/.config/opencode/opencode.json    # identical -> IDEMPOTENT=yes
+# seed invalid json as hermes + restart
+docker compose logs --since 2m robotina | grep cuarentenado                           # …invalid-20260922T190450Z
+docker compose exec -T robotina sh -c 'jq -e . …/opencode.json >/dev/null && echo valid-json'   # valid-json
+docker compose logs --tail 200 robotina | grep -E 'robotina: (opencode serve|engram serve)'      # both banners
+# --- task 21 ---
+for i in 1 2 3; do docker compose down && docker compose up -d && <bounded credential-aware probe>; done   # probe_exit=0 ×3
+docker compose logs --since 10m robotina 2>&1 | grep -Ei '127\.0\.0\.1:4096.*(refused|econnrefused)'      # no output
+# gate-failure throwaway (isolated)
+docker run -d --name robotina-gatefail --network none -v <up>:/etc/s6-overlay/s6-rc.d/opencode-ready/up:ro robotina:local sh -c 'echo GATE_TEST_CMD_RAN; sleep 600'
+docker logs robotina-gatefail | grep -E 'opencode-ready|GATE_TEST_CMD_RAN'             # warning … command exited 1; GATE_TEST_CMD_RAN
+docker rm -f robotina-gatefail                                                         # cleanup
+# --- task 28 ---
+docker compose exec -u hermes -T robotina sh -c 'pgrep -f "[o]pencode serve" | head -1'   # 227
+docker compose exec -u hermes -T robotina sh -c 'pkill -f "[o]pencode serve"'            # exit 0
+docker compose exec -T robotina sh -c '<bounded credential-aware probe>'               # exit 0 in 5 s
+docker compose logs --since 3m robotina | grep reinicio                                # opencode salio …; reinicio #1 en 1s
+docker compose exec -u hermes -T robotina sh -c 'pkill -f "[h]ermes gateway"'         # exit 0; s6 restarts gateway-default
+docker inspect --format '{{.RestartCount}} {{.State.StartedAt}}' robotina               # unchanged 0 2026-09-22T19:06:53.652872543Z
+docker compose exec -u hermes -T robotina sh -c 'kill 306'                              # rc.init child; shutdown wedges
+# 180 s watch: status=running RestartCount=0 StartedAt_changed=no (all 18 samples)
+docker compose up -d --force-recreate robotina                                          # recovery; healthy again
+```
+
+Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
+same line; the bare `docker compose config` form was never run and is never written here. No token
+or key value was ever printed.
+

@@ -403,14 +403,14 @@ inferred.
     `docker network inspect agents --format '{{range .Containers}}{{.Name}} {{end}}'` and
     `docker network inspect egress --format '{{range .Containers}}{{.Name}} {{end}}'`.
 
-- [ ] 21. Verify the readiness gate holds across repeated recreations and that no
+- [x] 21. Verify the readiness gate holds across repeated recreations and that no
   `ECONNREFUSED` reaches the log; record what s6-overlay does when the gate fails.
   Files: `odd/tasks/single-robotina-container.md`. Depends on: task 19.
   - Verify: `for i in 1 2 3; do docker compose down && docker compose up -d && docker compose exec robotina sh -c 'j=0; while [ $j -lt 60 ]; do set --; [ -n "${OPENCODE_SERVER_PASSWORD:-}" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"; curl -fsS "$@" -m 2 http://127.0.0.1:4096/global/health >/dev/null && exit 0; j=$((j+1)); sleep 2; done; exit 1' || exit 1; done`;
     `docker compose logs --since 10m robotina 2>&1 | grep -Ei '127\.0\.0\.1:4096.*(refused|econnrefused)'`
     (no output); record the measured cold start and the gate-failure behaviour.
 
-- [ ] 22. Verify the identity layers and the state-ownership behaviour at runtime (ID1, ID2,
+- [x] 22. Verify the identity layers and the state-ownership behaviour at runtime (ID1, ID2,
   ID3, ID5, SL6). Files: `odd/tasks/single-robotina-container.md`. Depends on: tasks 13, 14,
   15, 18.
   - Verify: `docker compose exec robotina sh -c 'ls -l /opt/data/skins/robotina.yaml'`;
@@ -481,7 +481,7 @@ inferred.
     `docker compose exec robotina sh -c 'i=0; while [ $i -lt 900 ]; do cat /sys/fs/cgroup/pids.current; i=$((i+1)); sleep 1; done | sort -n | tail -1'`
     (peak). Record all three numbers; they feed task 38.
 
-- [ ] 27. Verify the `opencode-init` semantics at runtime: overlay idempotency (double-run byte
+- [x] 27. Verify the `opencode-init` semantics at runtime: overlay idempotency (double-run byte
   identity), the invalid-JSON quarantine path, and engram output observability (AC5, SL4).
   Files: `odd/tasks/single-robotina-container.md`. Depends on: tasks 7, 18.
   - Verify: `docker compose exec robotina sh -c 'sha256sum /opt/data/.config/opencode/opencode.json'`
@@ -727,6 +727,16 @@ inferred.
   that named the static-validation command without `-q` on the same line (the `testing.static_validation`
   note and the `apply` rule). Both were reworded to refer to "the bare form"/"the
   static-validation command" by description, and the re-run is clean.
+- **Slice 09 update (apply):** tasks 21, 22 and 27 are verified at runtime on the live stack
+  (evidence in `odd/tasks/single-robotina-container.md` → `## Slice 09`). **Task 28 stays open:** the
+  s6 recovery half passes, but the amended single-lifecycle proof **failed** — the literal
+  `pkill -f "[h]ermes gateway"` cannot run as a root exec (`CAP_KILL` is dropped: `EPERM`), and when
+  the kill is performed as uid 10000 the gateway is restarted in place by the s6-supervised
+  `gateway-default` service while `RestartCount`/`StartedAt` stay unchanged. Killing the real main
+  program (`rc.init` child `sleep infinity`) starts the container shutdown but it **wedges** because
+  the root s6 supervisors cannot signal the uid-10000 services without `CAP_KILL`; the container
+  never exits and `restart: unless-stopped` never fires. This is a defect/decision for `sdd-verify`
+  (add `CAP_KILL`, change the main program, or re-word AC8), not an apply fix.
 - The five proof defects reported in design §19 are already reflected in the spec recipes;
   tasks 19 and 21 close the two remaining apply obligations, and task 40 records the observed
   gate behaviour.
