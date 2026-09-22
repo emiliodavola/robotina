@@ -1,7 +1,7 @@
 # Apply progress — single-robotina-container
 
 Cumulative per-slice progress. The original body below is **slice 02**; the sections for
-**slices 03, 04, 05 and 06** are appended at the end of this file, in order. Nothing in the earlier
+**slices 03, 04, 05, 06 and 07** are appended at the end of this file, in order. Nothing in the earlier
 bodies was overwritten or deleted; slice 05 reopens and re-closes two slice-04 tasks (10 and 12)
 with the reason recorded.
 
@@ -1338,3 +1338,197 @@ rm -rf <FIX>                                                     # fixture remov
 Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
 same line; the bare `docker compose config` form was never run and is never written here. No token
 or key value was ever printed.
+
+---
+
+# Slice 07 — `feat/single-robotina-container-07-docs` (bilingual READMEs + Q7 deletion)
+
+Appended to the cumulative body above. Nothing above was modified except the header line, which now
+marks this file as cumulative through slice 07.
+
+## Structured status consumed
+
+- Native `gentle-ai.sdd-status` v2 provided by the parent: `changeName: single-robotina-container`,
+  `artifactStore: openspec`, `nextRecommended: apply`, `applyState: ready`, `dependencies.apply:
+  ready`, `taskProgress: 27/45`, `blockedReasons: []`, `notes: []`.
+- `actionContext`: `mode: repo-local`, `workspaceRoot: C:\Users\elaze\Desktop\robotina`,
+  `allowedEditRoots: ["C:\Users\elaze\Desktop\robotina"]`. **No actionContext warnings** raised by
+  the status engine; one apply-observed finding (F1) is recorded below.
+- Review-workload gate: the parent prompt carries the resolved delivery path — chained PRs,
+  `feature-branch-chain`, tracker `feat/single-robotina-container`, current slice branch
+  `feat/single-robotina-container-07-docs`, `exception-ok` accepted per slice (~650 authored
+  lines). `tasks.md`'s forecast (`Decision needed before apply: Yes`, `Chained PRs recommended:
+  Yes`, `400-line budget risk: High`) is satisfied by that resolved path. This slice implements
+  task 33 plus the now-confirmed deletion of `scripts/fix-permissions.ps1`.
+- `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`, `test_command: null`; the
+  parent prompt did not activate strict TDD.
+- No child subagent was launched. No `git commit`/`git push`/PR was performed — the parent owns the
+  index and delivery. `git rm` (staging the deletion) was explicitly assigned and performed. No token
+  or key value was ever printed.
+
+## Completed task (28/45) and its persisted checkbox update
+
+`openspec/changes/single-robotina-container/tasks.md` now shows `- [x]` for task **33** (flipped
+in place). Counts after the edit: `grep -c '^- \[x\]'` = **28**, `grep -c '^- \[ \]'` = **17**.
+
+| Task | What was done | Verification actually run | Observed result |
+| --- | --- | --- | --- |
+| 33 | `README.md` (Spanish) and `README.en.md` (English) rewritten in one working-tree change for the single-container reality: topology + what replaced the previous layout, `docker compose build robotina`/`up -d`, the removed host permission step (ownership now fixed by the container's cont-init), the copy-forward migration (`scripts/migrate-state.ps1`) plus a documented POSIX `cp -an`/`rsync --ignore-existing` equivalent, the export-before-migrate safety net, the BotFather display-name-only step, in-container operator recipes (loopback-only endpoint, s6 in `/command`, `MSYS_NO_PATHCONV=1`), the persistence table (two nested WAL volumes + expected empty host mount points), measured versions, and the uid-10000 assumption | the task's six named greps plus AC9's four stale-claim greps, task 30's and task 31's greps (see «Verification commands» below) | all task-33 greps green on the READMEs; AC9 residuals are **SECURITY.md only** (pending-on-records, see F1) |
+| Q7 | `scripts/fix-permissions.ps1` deleted (`git rm` staged it) per the user's explicit decision; the two READMEs no longer mention it; `scripts/migrate-state.ps1`'s header comment reworded to drop the banned two-container phrasing (AC9 covers `scripts/`) | `git rm`; `git status --porcelain`; `grep -rniE "fix-permissions" README.md README.en.md`; AC9-2 grep over `scripts/` | `D  scripts/fix-permissions.ps1` staged; `git ls-files scripts/` = `export-state.sh`, `migrate-state.ps1`; no README hit; `scripts/` AC9-2 clean |
+
+## TDD Cycle Evidence
+
+**Not applicable.** `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`,
+`test_command: null`; the parent prompt did not activate strict TDD. No RED/GREEN table is produced
+because no test runner exists and none may be invented. Verification is the documentation grep suite
+below.
+
+## Files changed in this slice (authored line counts)
+
+| File | Change | Additions | Deletions |
+| --- | --- | --- | --- |
+| `README.md` | rewritten (Spanish) | 224 | 109 |
+| `README.en.md` | rewritten (English) | 231 | 115 |
+| `scripts/migrate-state.ps1` | header comment reworded (comment only) | 1 | 1 |
+| `scripts/fix-permissions.ps1` | **deleted** (`git rm`, staged) | 0 | 45 |
+| `openspec/changes/single-robotina-container/tasks.md` | task 33 checked + two slice-07 notes | ~13 | ~2 |
+| `odd/tasks/single-robotina-container.md` | Q7 resolution + slice-07 progress line | ~13 | ~1 |
+| `openspec/changes/single-robotina-container/apply-progress.md` | cumulative header + this section | new section | 0 |
+
+- **Authored changed lines (implementation/docs, excluding this file and the two change records):**
+  README.md **333** (224+109) + README.en.md **346** (231+115) + `migrate-state.ps1` **2** +
+  `fix-permissions.ps1` deletion **45** = **726**. The README pair alone is **679** authored lines
+  (forecast S7 was ~370).
+- **Budget:** implementation/docs **726** — **≈76 over** the user's ~650 per-slice approximate
+  acceptance, and the README pair alone is 679 vs the 400-line budget. It is **not** reducible
+  without dishonesty: task 33 requires both files rewritten in the same commit, and each file must
+  carry ten mandated content blocks (topology, build, removal of the host step, migration + POSIX
+  equivalent, safety net, BotFather, operator recipes, persistence table, versions, uid-10000 note)
+  in its own language. Nothing was compressed or deleted to fit (no section, table or note was
+  dropped).
+- **Recommendation:** accept the overage for this slice as-is (the two READMEs are one cohesive
+  bilingual work unit by task text); do **not** re-slice. `exception-ok` is the parent/user's to
+  accept, not claimed here.
+- `git status --porcelain` for the slice: ` M README.en.md`, ` M README.md`,
+  ` M scripts/migrate-state.ps1`, `D  scripts/fix-permissions.ps1` (staged), plus the two change
+  artifacts and the ODD file after their edits.
+
+## Deviations from design
+
+1. **D1 — the deletion is the user's decision, not this slice's.** Task 31 (design §8.4) left
+   `scripts/fix-permissions.ps1` in the tree as an interim safe default and stated no task in this
+   change may delete it. The user was asked explicitly and chose deletion in this session; task 31's
+   historical text is preserved and the resolution is recorded (tasks.md slice-07 note; ODD
+   `Open decisions`). The file is deleted and the deletion is staged.
+2. **D2 — the README clone branch was corrected.** The old READMEs cloned
+   `security/egress-hardening`, which is already merged into `main`; the rewrite clones the tracker
+   branch `feat/single-robotina-container` and says `main` is the default. Documentation truth fix,
+   no design statement changes.
+3. **D3 — `PowerShell 7` moved from a hard requirement to an optional Windows-migration
+   requirement.** It existed only for `fix-permissions.ps1` (now deleted) and is still needed for
+   `scripts/migrate-state.ps1`, so it is documented as optional and scoped to the migration, with
+   the POSIX equivalent for Linux/macOS. This follows the parent's instruction («Remove the
+   PowerShell 7 requirement if it existed only for that script»).
+4. **D4 — `scripts/migrate-state.ps1`'s header comment reworded.** Its first comment line contained
+   `layout de dos contenedores`, which agent-container AC9's grep bans across `scripts/`. One
+   comment line changed; no behaviour. Necessary so the docs slice's own verification is clean
+   outside `SECURITY.md`.
+
+## Findings for the parent (not fixed here — outside this slice)
+
+- **F1 — the AC9 stale-claim greps still have `SECURITY.md` residuals.** The four greps return:
+  `SECURITY.md:271,282,319` (`http://opencode:4096`); `SECURITY.md:3,259,334,467`
+  (`dos agentes`/`dos contenedores`); `SECURITY.md:360` (`docker compose exec opencode`);
+  `SECURITY.md:128` (`docker inspect hermes`, `docker inspect opencode`). Also `SECURITY.md:479,484`
+  still instruct running `scripts/fix-permissions.ps1` (now a deleted file) and `SECURITY.md:302`
+  carries the retired `sin credencial` phrasing. `SECURITY.md` is rewritten by the **records** slice
+  (tasks 39–40), not this one. **Recorded as pending-on-records; not edited here.**
+- **F2 — the exact task-33 proof `git diff --name-only $(git merge-base HEAD main)...HEAD --` is
+  empty until the parent commits.** The parent owns the index and did not commit, so the
+  `...HEAD` form sees no change; the working-tree equivalent (`git diff --name-only --`) lists both
+  `README.md` and `README.en.md`. The bilingual-pair property holds in the working tree; the
+  committed form will hold once the parent commits this slice.
+- **F3 — task 30's dry-run grep now has fewer hits.** Slice 06 recorded 3 hits for
+  `grep -rn "docker compose exec opencode" README.md README.en.md SECURITY.md scripts/ hermes/`
+  (README.md:190, README.en.md:198, SECURITY.md:360). This slice removed the two README hits; the
+  remaining one is `SECURITY.md:360`, pending-on-records. Task 30 itself is already `- [x]`.
+- **F4 — the version table is measured, not inherited.** Measured live in the running containers
+  this session: opencode 1.18.32, Squid 6.13, gh 2.97.0, git 2.47.3, Go 1.24.4, uv 0.11.6, jq 1.7,
+  ripgrep 14.1.1, Python 3.13.5, Node v26.5.1, R 4.5.0, engram 1.20.0, gentle-ai 3.1.0,
+  taplo 0.10.0, marksman 2026-02-08, codegraph 1.5.0. Go is the image's own toolchain
+  (`go version go1.24.4 linux/amd64`), matching slice 03's build record.
+- **F5 — the host nested mount-point directories are empty and exist.** Verified host-side:
+  `${HOST_DATA_DIR}` = `backups`, `hermes`, `workspace`, and
+  `hermes/.engram` + `hermes/.local/share/opencode` exist and are empty (the volumes shadow them).
+  The persistence table documents exactly this.
+
+## Remaining tasks (17) — exact unchecked lines from the persisted artifact
+
+```text
+- [ ] 21. Verify the readiness gate holds across repeated recreations and that no
+- [ ] 22. Verify the identity layers and the state-ownership behaviour at runtime (ID1, ID2,
+- [ ] 26. **[measurement-dependent]** Sample the merged cgroup's `pids.current` baseline and
+- [ ] 27. Verify the `opencode-init` semantics at runtime: overlay idempotency (double-run byte
+- [ ] 28. Verify s6 recovery and the single-lifecycle property (AC5, AC8 amended proof).
+- [ ] 34. Update `openspec/project.md`: services table, coupling map, repository layout,
+- [ ] 35. Add the **superseded-by** note to `odd/tasks/agent-interop-http.md` (R6) without
+- [ ] 36. Align the stale `OPEN ITEM` annotations in this change's own specs with the design
+- [ ] 37. Conditional wording alignment: check `openspec/config.yaml`'s prose line that names
+- [ ] 38. **[measurement-dependent]** Apply design §16's pre-committed adjustment rule to the
+- [ ] 39. Rewrite `SECURITY.md`'s non-measured retained entries (Spanish): R1 (credential
+- [ ] 40. **[measurement-dependent]** Add `SECURITY.md`'s measured evidence entries: R3's
+- [ ] 41. Finalize the change record: replace the ODD file's `## Verification evidence`
+- [ ] 42. Run the verification suite end to end on the final tree and record the result.
+- [ ] 43. Confirm the frozen egress boundary and the mandatory-input guard survived the merge.
+- [ ] 44. Confirm the rollback path is intact: both state volume names unchanged, the three
+- [ ] 45. Final secret-leak audit over the whole change, including this file.
+```
+
+Tasks 21, 22, 26, 27, 28 are runtime-verification tasks not assigned to this slice; 34–45 are the
+records / spec-alignment / measurement slices that follow.
+
+## Workload / PR boundary
+
+- **PR boundary:** this slice contains exactly `README.md`, `README.en.md`,
+  `scripts/migrate-state.ps1` (comment), the deletion of `scripts/fix-permissions.ps1` (staged),
+  `openspec/changes/single-robotina-container/tasks.md` (task 33 + slice-07 notes),
+  `odd/tasks/single-robotina-container.md` (Q7 + progress) and this `apply-progress.md`. Targeted
+  at the tracker branch `feat/single-robotina-container` under `feature-branch-chain`. The records
+  slice (34–45) is **not** started.
+- No `git commit`, `git push` or PR was created — the parent owns delivery and the index.
+
+## Verification commands run in this slice (exhaustive, with observed output)
+
+```text
+# --- task 33, the six named greps ---
+git diff --name-only <merge-base HEAD main>...HEAD -- README.md README.en.md   # empty (not committed yet; see F2)
+git diff --name-only -- README.md README.en.md                               # README.en.md, README.md
+grep -c "docker compose exec robotina" README.md README.en.md                # README.md:9  README.en.md:9
+grep -ci "botfather" README.md README.en.md                                  # README.md:3  README.en.md:3
+grep -rniA6 "botfather" README.md README.en.md | grep -iE "username"          # no output (exit 1)
+grep -ciE "migra|migration|\.config/opencode" README.md README.en.md          # README.md:12  README.en.md:13
+# --- AC9's four stale-claim greps (READMEs clean; SECURITY.md residual) ---
+grep -rn "http://opencode:4096" README.md README.en.md SECURITY.md hermes/ scripts/   # SECURITY.md:271,282,319
+grep -rniE "dos agentes|dos contenedores|two agent containers|two containers|sibling container|contenedor hermano" README.md README.en.md SECURITY.md hermes/ scripts/   # SECURITY.md:3,259,334,467
+grep -rn "docker compose exec opencode" README.md README.en.md SECURITY.md scripts/ hermes/ .env.example   # SECURITY.md:360
+grep -rn "docker inspect hermes\|docker inspect opencode" README.md README.en.md SECURITY.md .env.example   # SECURITY.md:128
+# --- task 30 / task 31 / SL5 greps ---
+grep -rn "docker compose exec opencode" README.md README.en.md SECURITY.md scripts/ hermes/   # SECURITY.md:360 only
+grep -rniE "fix-permissions" README.md README.en.md SECURITY.md              # SECURITY.md:479,484 only
+grep -rniE "fix-permissions" README.md README.en.md                          # no output (exit 1)
+# --- deletion staged ---
+git rm scripts/fix-permissions.ps1                                           # rm 'scripts/fix-permissions.ps1'
+git status --porcelain -- scripts/fix-permissions.ps1                        # D  scripts/fix-permissions.ps1
+git ls-files scripts/                                                        # scripts/export-state.sh, scripts/migrate-state.ps1
+git diff --cached --numstat -- scripts/fix-permissions.ps1                    # 0  45  scripts/fix-permissions.ps1
+# --- measured facts used in the README ---
+docker compose ps --format 'table {{.Name}}\t{{.Status}}\t{{.Ports}}'        # egress-proxy + robotina, both Up (healthy)
+docker compose exec -T egress-proxy squid -v | head -2                       # Squid Cache: Version 6.13
+docker compose exec -T robotina sh -c '<tool version probes>'               # opencode 1.18.32, gh 2.97.0, taplo 0.10.0, marksman 2026-02-08, codegraph 1.5.0, gentle-ai 3.1.0, uv 0.11.6, node v26.5.1, python 3.13.5, R 4.5.0, git 2.47.3, go 1.24.4, jq 1.7, rg 14.1.1
+ls -A "$HOST_DATA_DIR"                                                       # backups, hermes, workspace
+ls -ld "$HOST_DATA_DIR/hermes/.engram" "$HOST_DATA_DIR/hermes/.local/share/opencode"   # both exist; ls -A empty (expected mount points)
+```
+
+Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
+same line; the bare `docker compose config` form was never run and is never written here. No token
+or key value was ever printed — version probes and greps only, never `.env` values.

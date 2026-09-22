@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-# Migra el estado del layout de dos contenedores al layout del contenedor unico
+# Migra el estado del layout de contenedores separados al layout del contenedor unico
 # `robotina`.
 #
 # Que hace: copia "hacia adelante" el estado que hoy vive en carpetas del host
