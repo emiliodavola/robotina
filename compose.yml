@@ -1,14 +1,16 @@
 # ============================================================================
-# Robotina - dos agentes autonomos (Hermes gateway + OpenCode) sobre un
-# workspace compartido.
+# Robotina - un unico contenedor de agentes (Hermes gateway + opencode serve +
+# engram) supervisados por s6-overlay, sobre un workspace compartido.
 #
 # Modelo de seguridad:
-#   1. Ningun agente tiene ruta directa a Internet: ambos viven solo en la red
+#   1. El agente no tiene ruta directa a Internet: vive solo en la red
 #      `agents` (internal: true), que no tiene gateway hacia afuera.
 #   2. La unica salida es `egress-proxy` (Squid), que solo acepta los dominios
 #      declarados en squid/allowlist.txt. Todo lo demas se deniega.
-#   3. Sin puertos publicados: nada entra desde el host ni desde la LAN.
-#   4. Contenedores sin capabilities, sin escalada de privilegios, con limites
+#   3. Sin puertos publicados: nada entra desde el host ni desde la LAN. El
+#      servidor HTTP de opencode escucha en 127.0.0.1 adentro del contenedor,
+#      asi que ningun par de red puede alcanzarlo.
+#   4. Contenedor sin capabilities, sin escalada de privilegios, con limites
 #      de CPU/memoria/PIDs, core dumps desactivados y logs acotados.
 #
 # Secretos: se interpolan desde un `.env` externo (nunca versionado; ver
@@ -16,21 +18,24 @@
 # con `docker inspect`. Materializarlas como archivos requiere envolver los
 # entrypoints de las imagenes.
 #
-# Persistencia: TODO el estado (config de los agentes, memoria de engram, el
-# workspace) vive en carpetas del host bajo HOST_DATA_DIR, no en volumenes
-# nombrados de Docker. Son visibles, editables y respaldables como cualquier
-# proyecto, y sobreviven a un reset de Docker Desktop. HOST_DATA_DIR se define
-# en `.env` y es obligatorio: si falta, el stack no arranca, para que el estado
-# nunca termine escondido adentro del repo.
+# Persistencia: el estado del agente (configuracion de Hermes y de opencode,
+# identidad de git, memoria de engram y el workspace) vive en carpetas del host
+# bajo HOST_DATA_DIR, no en volumenes nombrados de Docker. Son visibles,
+# editables y respaldables como cualquier proyecto, y sobreviven a un reset de
+# Docker Desktop. La excepcion son las dos bases SQLite en modo WAL, que van en
+# volumenes NATIVOS anidados dentro de ese bind (ver `volumes:` al pie).
+# HOST_DATA_DIR se define en `.env` y es obligatorio: si falta, el stack no
+# arranca, para que el estado nunca termine escondido adentro del repo.
 # ============================================================================
 
-# Baseline aplicado a los tres servicios.
+# Baseline aplicado a los dos servicios. `pids_limit` SALE del ancla: es un
+# presupuesto dimensionado, no una constante de hardening, y ahora difiere 8x
+# entre el agente y el proxy.
 x-hardening: &hardening
   security_opt:
     - no-new-privileges:true
   cap_drop:
     - ALL
-  pids_limit: 512
   ulimits:
     core: 0
   stop_grace_period: 20s
@@ -40,15 +45,17 @@ x-hardening: &hardening
       max-size: "10m"
       max-file: "3"
 
-# Los agentes solo pueden salir por el proxy. Los clientes que ignoren estas
-# variables fracasan en vez de evadir el control de egreso.
+# El agente solo puede salir por el proxy. Los clientes que ignoren estas
+# variables fracasan en vez de evadir el control de egreso. El nombre interno
+# del unico agente es `robotina`; el salto a loopback (127.0.0.1) nunca pasa
+# por Squid.
 x-egress-env: &egress-env
   HTTP_PROXY: http://egress-proxy:3128
   HTTPS_PROXY: http://egress-proxy:3128
   http_proxy: http://egress-proxy:3128
   https_proxy: http://egress-proxy:3128
-  NO_PROXY: localhost,127.0.0.1,::1,hermes,opencode,egress-proxy
-  no_proxy: localhost,127.0.0.1,::1,hermes,opencode,egress-proxy
+  NO_PROXY: localhost,127.0.0.1,::1,robotina,egress-proxy
+  no_proxy: localhost,127.0.0.1,::1,robotina,egress-proxy
 
 services:
   # --------------------------------------------------------------------------
@@ -90,21 +97,37 @@ services:
     <<: *hardening
 
   # --------------------------------------------------------------------------
-  # Hermes gateway: bot de Telegram. Sin red de Internet propia.
+  # Unico agente del stack: Hermes (bot de Telegram) + `opencode serve` +
+  # engram, supervisados por s6-overlay adentro del mismo contenedor. Sin red
+  # de Internet propia.
+  #
+  # La imagen es derivada (robotina/Dockerfile): parte de la imagen vendor de
+  # Hermes (Debian, glibc, s6-overlay) y le agrega la toolchain que tenia la
+  # imagen de opencode (node, npm, python, git, gh, los LSP, engram, gentle-ai).
   # --------------------------------------------------------------------------
-  hermes:
-    image: nousresearch/hermes-agent:latest
-    container_name: hermes
+  robotina:
+    build:
+      context: ./robotina
+    image: robotina:local
+    container_name: robotina
     restart: unless-stopped
     # Sin `init: true`: Hermes corre s6-overlay y exige ser PID 1. Con el init de
     # Docker como PID 1 el entrypoint degrada ("skipping s6-overlay /init...
     # Supervised services are unavailable") y no levantaria sus servicios.
+    # Tampoco `user:`: la imagen rechaza un UID arbitrario; para mapear al UID
+    # del host van HERMES_UID / HERMES_GID manteniendo root en el arranque.
+    # opencode y engram no son hijos en background de un entrypoint: se declaran
+    # como servicios propios en el bundle `user2` de s6 (robotina/s6/).
     command: ["gateway", "run"]
     environment:
       <<: *egress-env
       TZ: America/Argentina/Buenos_Aires
-      # OpenCode Go
+      # Hermes usa su clave con el nombre exacto que espera la imagen vendor.
       OPENCODE_GO_API_KEY: ${HERMES_OPENCODE_GO_API_KEY:?definir HERMES_OPENCODE_GO_API_KEY en .env}
+      # La clave de opencode viaja bajo un nombre propio: el run script de su
+      # servicio la exporta como OPENCODE_GO_API_KEY SOLO para su proceso (nunca
+      # se parchea un archivo del vendor).
+      ROBOTINA_OPENCODE_GO_API_KEY: ${OPENCODE_GO_API_KEY:?definir OPENCODE_GO_API_KEY en .env}
       # Telegram
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?definir TELEGRAM_BOT_TOKEN en .env}
       # Quien puede hablarle al bot. Vacio (default) = fail closed: Hermes manda
@@ -113,32 +136,53 @@ services:
       # de Telegram (te lo da @userinfobot) en .env:
       #   TELEGRAM_ALLOWED_USERS=123456789
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
-      # Password del servidor de OpenCode (red interna). Vacio = servidor sin
-      # autenticar: solo lo alcanza quien este en la red `agents` (Hermes y el
-      # proxy). Poniendo el mismo valor en .env, Hermes lo usa para hablarle.
+      # Token de GitHub (decision D3): `gh` y el credential helper de git lo
+      # leen de aca, sin `gh auth login`. Riesgo asumido: el agente que habla por
+      # Telegram ahora comparte contenedor con este token, y el token es legible
+      # con `docker inspect`.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Sin prompts interactivos de credenciales: falla rapido en lugar de
+      # quedarse esperando una respuesta que nunca va a llegar.
+      GIT_TERMINAL_PROMPT: "0"
+      # Password del servidor de opencode, defensa en profundidad y no frontera:
+      # el puerto es loopback-only, asi que ningun par de red lo alcanza. Vacio
+      # = servidor sin autenticar. Poniendo el mismo valor en .env, Hermes y el
+      # run script de opencode lo usan para hablarle.
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
-      # Los dos agentes comparten /workspace y, con `cap_drop: ALL`, un proceso
-      # sin CAP_DAC_OVERRIDE no puede escribir archivos de otro uid: con Hermes en
-      # 10000 y opencode como root, NINGUNO podia editar lo del otro (medido en
-      # las dos direcciones, "Permission denied"). La alineacion se hace del lado
-      # de opencode (`user: 10000`), porque esta imagen valida HERMES_UID entre 1
-      # y 65534 y DESCARTA 0 en silencio: no acepta correr su app como root.
+      # Rutas, no configuracion por proceso: las necesitan tambien los `exec`
+      # de operador (git config --global, engram export, go env).
+      ENGRAM_DATA_DIR: /opt/data/.engram
+      GIT_CONFIG_GLOBAL: /opt/data/.config/git/config
+      GOPATH: /opt/data/go
     volumes:
-      # Estado de Hermes en el host: configuracion, sesiones, memoria,
-      # credenciales, logs.
+      # Estado del agente en el host: configuracion de Hermes, sesiones,
+      # memoria, credenciales y logs; y adentro suyo la config de opencode, la
+      # identidad de git y el cache de Go, porque HOME=/opt/data para los dos
+      # arboles de procesos.
       - type: bind
         source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/hermes
         target: /opt/data
-      # Workspace compartido con OpenCode, tambien en el host.
+      # Workspace compartido, tambien en el host.
       - type: bind
         source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/workspace
         target: /workspace
+      # Salida de scripts/export-state.sh: JSON legible y portable, en el host.
+      - type: bind
+        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/backups
+        target: /backups
       # Skills propias del stack, agrupadas en su propia categoria. Read-only:
       # el agente no puede reescribir sus propias instrucciones. Una sola montura
       # para todas, asi sumar una skill no obliga a tocar compose.
       - type: bind
         source: ./hermes/skills
         target: /opt/data/skills/stack
+        read_only: true
+      # Skin de identidad `robotina`. Read-only: el agente no puede reescribir
+      # su propio archivo de identidad. Se monta el directorio entero para que
+      # sumar otra skin no obligue a tocar compose.
+      - type: bind
+        source: ./hermes/skins
+        target: /opt/data/skins
         read_only: true
       # Hechos del entorno + la regla de credenciales, en el archivo de contexto de
       # MAYOR prioridad que Hermes busca desde su cwd. Como el cwd de la terminal es
@@ -149,138 +193,75 @@ services:
         source: ./hermes/context/.hermes.md
         target: /workspace/.hermes.md
         read_only: true
-    tmpfs:
-      # Escrituras temporales solo en memoria: no quedan residuos en el disco
-      # del host ni en la capa del contenedor.
-      # `exec` es obligatorio: Docker agrega noexec a todo tmpfs salvo que lo
-      # pidas explicito (medido con /proc/mounts).
-      - /tmp:rw,exec,nosuid,nodev,size=256m,mode=1777
-    networks:
-      # Comunicacion Hermes <-> OpenCode <-> proxy. Sin salida directa.
-      - agents
-    mem_limit: 2g
-    cpus: 2.0
-    <<: *hardening
-    # s6-overlay baja privilegios con `s6-setuidgid hermes` (initgroups →
-    # SETUID/SETGID) y ajusta el dueno del volumen (CHOWN/DAC_OVERRIDE/FOWNER).
-    # Con `cap_drop: [ALL]` el arranque muere con:
-    #   s6-applyuidgid: fatal: unable to set supplementary group list: Operation not permitted
-    # No usar `user:`: la imagen rechaza un UID arbitrario; para mapear al UID
-    # del host van HERMES_UID / HERMES_GID manteniendo root en el arranque.
-    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
-
-  # --------------------------------------------------------------------------
-  # OpenCode: agente de codigo, headless. Sin red de Internet propia.
-  #
-  # Corre como servidor HTTP (`serve`) en la red `agents`: asi Hermes puede
-  # despacharle trabajo sin que los dos compartan contenedor. El puerto NO se
-  # publica, asi que solo lo alcanza quien esta en esta red interna.
-  #
-  # La imagen es derivada (opencode/Dockerfile): la oficial es Alpine pelado y
-  # no trae node, npm, python, git, los LSP ni gentle-ai. Los artefactos de
-  # gentle-ai los genera SU instalador en el build; nada se copia a mano.
-  # --------------------------------------------------------------------------
-  opencode:
-    build:
-      context: ./opencode
-    image: robotina-opencode:local
-    container_name: opencode
-    # Los dos agentes comparten /workspace y, con `cap_drop: ALL`, un proceso sin
-    # CAP_DAC_OVERRIDE no puede escribir archivos de otro uid: root crea 0644 y el
-    # usuario `hermes` (uid 10000) 0664, asi que NINGUNO podia editar lo del otro
-    # (medido en las dos direcciones). La imagen de Hermes DESCARTA HERMES_UID=0 en
-    # silencio (valida 1-65534), asi que la alineacion se hace aca: opencode corre
-    # con el uid 10000.
-    # Requiere que las carpetas montadas y los volumenes sean de ese uid:
-    #   pwsh -File scripts/fix-permissions.ps1
-    user: "10000:10000"
-    restart: unless-stopped
-    init: true
-    working_dir: /workspace
-    command: ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
-    environment:
-      <<: *egress-env
-      TZ: America/Argentina/Buenos_Aires
-      # OpenCode Go
-      OPENCODE_GO_API_KEY: ${OPENCODE_GO_API_KEY:?definir OPENCODE_GO_API_KEY en .env}
-      # Sin prompts interactivos de credenciales: falla rapido en lugar de
-      # quedarse esperando una respuesta que nunca va a llegar.
-      GIT_TERMINAL_PROMPT: "0"
-      # Token de GitHub. gh y el credential helper de git lo leen de aca, sin
-      # `gh auth login`. Riesgo asumido (elegido por el usuario): es legible con
-      # `docker inspect`, a cambio de no tener un archivo de credenciales extra.
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      # La config GLOBAL de git (identidad de commits, preferencias) apunta a la
-      # carpeta del host, para que no se pierda en cada recreate.
-      GIT_CONFIG_GLOBAL: /root/.config/git/config
-      # Password que exige el servidor de OpenCode (mismo valor que en hermes).
-      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
-      # Memoria de engram: viven en el host junto al resto del estado.
-      ENGRAM_DATA_DIR: /root/.engram
-      # HOME explicito: corre como uid 10000 y /root es atravesable pero no suyo.
-      HOME: /root
-    volumes:
-      # Codigo/repositorios (el mismo del host que ve Hermes).
-      - type: bind
-        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/workspace
-        target: /workspace
-      # Config de opencode: plugins que instala el runtime, package-lock y los
-      # artefactos que el entrypoint aplica en cada arranque.
-      - type: bind
-        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/opencode
-        target: /root/.config/opencode
-      # Cerebro de engram (SQLite en modo WAL). Volumen NATIVO, no carpeta del
-      # host: WAL sobre virtiofs/9p (carpetas de Windows) puede corromperse en
-      # silencio — es lo que Hermes denuncia y lo que medimos: engram re-activa
-      # WAL al escribir, no hay forma de fijarlo en rollback. El estado se saca
-      # al host en JSON con scripts/export-state.sh.
-      - type: volume
-        source: engram_db
-        target: /root/.engram
-      # Sesiones y base propia de opencode (opencode.db), mismo motivo: opencode
-      # fuerza WAL. Sin este volumen el historial vive en la capa del contenedor
-      # y se pierde en cada recreate.
+      # Sesiones y base propia de opencode (opencode.db): volumen NATIVO anidado
+      # dentro del bind de /opt/data. opencode fuerza WAL, y WAL sobre
+      # virtiofs/9p (carpetas de Windows) puede corromperse en silencio — es lo
+      # que Hermes denuncia y lo que medimos: engram re-activa WAL al escribir,
+      # no hay forma de fijarlo en rollback. El nombre del volumen es el mismo de
+      # antes de la fusion, asi que el rollback lo vuelve a montar en su ruta
+      # vieja. Sin este volumen el historial vive en la capa del contenedor y se
+      # pierde en cada recreate.
       - type: volume
         source: opencode_db
-        target: /root/.local/share/opencode
-      # Salida de scripts/export-state.sh: JSON legible y portable, en el host.
-      - type: bind
-        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/backups
-        target: /backups
-      # Config global de git en el host (GIT_CONFIG_GLOBAL apunta aca): identidad
-      # de commits y preferencias que sobreviven a los recreates.
-      - type: bind
-        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/git
-        target: /root/.config/git
-      # GOPATH (cache de modulos y binarios de `go install`). Es cache: en la
-      # imagen no hay nada en esta ruta, asi que el mount no tapa nada y evita
-      # volver a bajar los modulos en cada recreate.
-      - type: bind
-        source: ${HOST_DATA_DIR:?definir HOST_DATA_DIR en .env, por ej. C:/robotina-data}/go
-        target: /root/go
+        target: /opt/data/.local/share/opencode
+      # Cerebro de engram (SQLite en modo WAL), mismo motivo y mismo trato. El
+      # estado se saca al host en JSON con scripts/export-state.sh.
+      - type: volume
+        source: engram_db
+        target: /opt/data/.engram
       # El script de export, versionado en el repo y de solo lectura.
       - type: bind
         source: ./scripts/export-state.sh
         target: /opt/export-state.sh
         read_only: true
     tmpfs:
-      # `exec` obligatorio: OpenTUI extrae una .so a /tmp y la carga con dlopen;
-      # sobre un tmpfs noexec eso falla con EPERM y el contenedor entra en
-      # crash loop ("Error loading shared library /tmp/....so: Operation not
-      # permitted"). El agente ya ejecuta codigo arbitrario por diseno, asi que
-      # noexec aca no aporta seguridad real.
+      # Escrituras temporales solo en memoria: no quedan residuos en el disco
+      # del host ni en la capa del contenedor.
+      # `exec` es obligatorio: Docker agrega noexec a todo tmpfs salvo que lo
+      # pidas explicito (medido con /proc/mounts). OpenTUI extrae una .so a /tmp
+      # y la carga con dlopen; sobre un tmpfs noexec eso falla con EPERM y el
+      # contenedor entra en crash loop.
       - /tmp:rw,exec,nosuid,nodev,size=256m,mode=1777
     networks:
-      # Comunicacion con Hermes y salida via proxy. Sin salida directa.
+      # Unica red del agente: habla con el proxy y consigo mismo por loopback.
+      # Sin salida directa.
       - agents
-    mem_limit: 4g
-    cpus: 4.0
+    mem_limit: 6g
+    cpus: 6.0
+    # Presupuesto de procesos del cgroup fusionado (Hermes + opencode + sus LSP
+    # + engram + builds). Es un presupuesto dimensionado, no una constante de
+    # hardening: se confirma o se ajusta con la medicion de pids.current bajo el
+    # peor caso concurrente.
+    pids_limit: 1024
+    # Observabilidad, no recuperacion: `restart: unless-stopped` actua sobre la
+    # salida de PID 1, no sobre el health status. Sin este healthcheck, un
+    # opencode o un engram en crash loop son invisibles en `docker compose ps`.
+    healthcheck:
+      test: ["CMD", "/opt/robotina/healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
     <<: *hardening
+    # s6-overlay baja privilegios con `s6-setuidgid hermes` (initgroups →
+    # SETUID/SETGID), ajusta el dueno del volumen (CHOWN/DAC_OVERRIDE/FOWNER) y
+    # necesita poder senalar a sus hijos de uid 10000 para bajarlos (KILL).
+    # Con `cap_drop: [ALL]` el arranque muere con:
+    #   s6-applyuidgid: fatal: unable to set supplementary group list: Operation not permitted
+    # Sin KILL el arranque funciona pero el apagado iniciado adentro se traba:
+    # los supervisores root no pueden senalar a los servicios de uid 10000, el
+    # arbol s6 no baja, PID 1 no sale y Docker termina mandando SIGKILL pasado
+    # `stop_grace_period`. Medido: los procesos de uid 10000 quedan con
+    # CapEff=0x0, asi que no pueden ganar KILL por su cuenta; readmitirla en el
+    # contenedor restaura la mecanica de supervision sin ampliar lo que puede
+    # hacer el agente. Mascara de bounding set resultante: 0xeb.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]
 
-# Bases SQLite en modo WAL: en volumenes NATIVOS, porque WAL sobre una carpeta
-# de Windows puede corromperse en silencio. El resto del estado (config de los
-# agentes, plugins, skills, el workspace y TODO lo de Hermes) vive en carpetas
-# del host. Para sacar estas dos bases al host: scripts/export-state.sh.
+# Bases SQLite en modo WAL: en volumenes NATIVOS anidados dentro del bind de
+# /opt/data, porque WAL sobre una carpeta de Windows puede corromperse en
+# silencio. Los nombres son los mismos de antes de la fusion, asi que el
+# rollback los vuelve a montar en sus rutas viejas. Para sacar estas dos bases
+# al host: scripts/export-state.sh.
 volumes:
   opencode_db:
     name: robotina_opencode_db
@@ -288,7 +269,7 @@ volumes:
     name: robotina_engram_db
 
 networks:
-  # Red privada entre agentes y proxy.
+  # Red privada entre el agente y el proxy.
   # internal: true => sin gateway hacia Internet para nadie que este aca.
   agents:
     name: agents

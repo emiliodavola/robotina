@@ -1,0 +1,27 @@
+#!/command/with-contenv sh
+# Reinicio de `opencode` con backoff exponencial ACOTADO. s6-supervise lo corre
+# justo antes de reiniciar; $1 = codigo de salida, $2 = senal (si lo mato una).
+#
+# Por que backoff y no el default de s6 (reinicio inmediato, siempre): un
+# opencode en crash loop se llevaria por delante las mismas 6 CPUs que comparte
+# con Hermes — la preocupacion de inanicion de R5 convertida en una denegacion
+# de servicio contra el gateway de Telegram. El tope de 30 s acota el costo de
+# CPU y de log de un servicio roto sin salida.
+#
+# Por que un `finish` y no un archivo `down` (circuit breaker): un `down`
+# convierte una falla que se cura sola en una que necesita operador. El
+# healthcheck ya expone la condicion.
+#
+# Los contadores viven en /tmp (tmpfs): se limpian solos en cada recreacion del
+# contenedor, asi que un contenedor nuevo arranca siempre con el presupuesto
+# completo de reintentos.
+set -u
+svc=opencode
+st=/tmp/robotina; mkdir -p "$st"
+now=$(date +%s); start=$(cat "$st/$svc.start" 2>/dev/null || echo 0)
+# Corrida sana (>= 10 s): el proximo reinicio vuelve a empezar de 1.
+if [ $((now - start)) -ge 10 ]; then echo 0 > "$st/$svc.fail"; fi
+n=$(cat "$st/$svc.fail" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$st/$svc.fail"
+case $n in 1) s=1;; 2) s=2;; 3) s=4;; 4) s=8;; 5) s=16;; *) s=30;; esac
+echo "robotina: $svc salio (exit=$1 sig=${2:-0}); reinicio #$n en ${s}s" >&2
+sleep "$s"

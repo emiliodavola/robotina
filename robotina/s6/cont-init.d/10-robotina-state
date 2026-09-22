@@ -1,0 +1,97 @@
+#!/command/with-contenv sh
+# =============================================================================
+# cont-init de robotina: deja el arbol de estado listo para el uid de la app.
+#
+# Corre como root y DESPUES de los hooks del vendor. s6-overlay ejecuta
+# /etc/cont-init.d/* en orden lexicografico, asi que el orden real es:
+#   01-hermes-setup -> 015-supervise-perms -> 02-reconcile-profiles -> ESTE.
+# El prefijo 10 lo garantiza: cualquier hook propio que se agregue despues debe
+# usar un numero mayor.
+#
+# Por que existe: reemplaza el paso manual del host, que corria una imagen
+# alpine:latest SIN pin como root con la carpeta de estado del host montada para
+# hacer chown a mano. Ahora lo hace el propio contenedor, en cada arranque y
+# antes de que s6-rc levante los servicios de usuario. Es la unica forma de que
+# una carpeta de estado recien creada en el host quede escribible por el uid de
+# la app SIN un paso privilegiado del host (SL6).
+#
+# No toca el arbol s6, ni los archivos del vendor, ni la politica de egreso:
+# solo directorios y ownership. Es idempotente.
+# =============================================================================
+set -eu
+
+# El uid/gid se derivan del usuario `hermes` en runtime, nunca se hardcodean: si
+# alguien define HERMES_UID/PUID, el remap del vendor corre ANTES que este script
+# y la derivacion sigue siendo la correcta.
+uid="$(id -u hermes)"
+gid="$(id -g hermes)"
+
+# --- 1. Directorios de estado que la app espera encontrar --------------------
+# `install -d` es idempotente, crea los padres que falten Y re-aplica el dueno a
+# los que YA existan (medido: un /tmp/x root-owned pasa a 10000:10000). Esto
+# ultimo es lo que importa: el hook del vendor 01-hermes-setup suele crear
+# /opt/data/.config y /opt/data/.local como ROOT antes que corra este script, y
+# un `install -d` que solo listara las hojas dejaba esos PADRES root-owned. Con
+# /opt/data/.local en root 0755, uid 10000 no puede crear .local/state y Hermes
+# muere con `Permission denied: '/opt/data/.local/state'` (medido: fallaba el
+# gateway lock y la conexion de Telegram). Por eso la lista incluye los padres,
+# el directorio que la app crea por su cuenta (.local/state) y el cache XDG que
+# usa el run de opencode (XDG_CACHE_HOME=/opt/data/.cache).
+# No se listan las dos raices de volumen anidadas (.engram y
+# .local/share/opencode): ya existen como monturas y se re-ownan en el paso 3.
+install -d -o "$uid" -g "$gid" \
+  /opt/data/.config \
+  /opt/data/.config/opencode \
+  /opt/data/.config/git \
+  /opt/data/.local \
+  /opt/data/.local/share \
+  /opt/data/.local/state \
+  /opt/data/.cache \
+  /opt/data/go \
+  /opt/data/logs \
+  /workspace \
+  /backups
+
+# --- 2. Autocuracion: que el uid de la app pueda escribir lo que ESCRIBE -----
+# El test no puede mirar solo la raiz: /opt/data puede ser hermes:0700 y aun
+# asi tener .local root-owned, que es exactamente el caso que rompia Telegram
+# (`Permission denied: /opt/data/.local/state`). Un test sobre la raiz sola
+# quedaba satisfecho y saltaba la reparacion. Aca se comprueba cada directorio
+# que la app escribe de verdad; si alguno falla, se re-owna el arbol.
+#
+# `find -prune` sobre las CUATRO monturas que cuelgan de /opt/data (/opt/data/skins
+# y /opt/data/skills/stack son bind read-only; los dos volumenes se re-ownan
+# aparte en el paso 3) evita cruzar hacia otro filesystem: un chown recursivo que
+# atravesara una montura read-only fallaria y abortaria el arranque. NO se usa
+# `chown --one-file-system` porque el chown de coreutils no tiene esa opcion
+# (medido: no aparece en --help).
+missing=""
+for d in \
+  /opt/data/.config \
+  /opt/data/.local \
+  /opt/data/.local/share \
+  /opt/data/.local/state \
+  /opt/data/.cache \
+  /opt/data/.config/opencode \
+  /opt/data/.config/git \
+  /opt/data/go \
+  /opt/data/logs; do
+  s6-setuidgid hermes test -w "$d" || missing=1
+done
+if [ -n "$missing" ]; then
+  echo "robotina: hay directorios de estado no escribibles por uid $uid; re-ownando (sin cruzar monturas)" >&2
+  find /opt/data \
+    \( -path /opt/data/skins \
+       -o -path /opt/data/skills/stack \
+       -o -path /opt/data/.engram \
+       -o -path /opt/data/.local/share/opencode \) -prune -o \
+    -exec chown "$uid:$gid" {} +
+fi
+
+# --- 3. Dueno explicito y acotado de las dos raices de volumen ---------------
+# El paso 2 las salteo a proposito (son otro filesystem). Se re-ownan aca,
+# recursivo pero acotado a dos directorios, para que las bases SQLite en modo WAL
+# queden escribibles por el uid de la app.
+chown -R "$uid:$gid" /opt/data/.engram /opt/data/.local/share/opencode
+
+echo "robotina: estado listo (uid=$uid gid=$gid)"

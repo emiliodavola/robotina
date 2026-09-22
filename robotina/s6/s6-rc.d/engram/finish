@@ -1,0 +1,13 @@
+#!/command/with-contenv sh
+# Reinicio de `engram` con backoff exponencial ACOTADO. Mismo script que el de
+# `opencode`, parametrizado con su propio nombre; ver ../opencode/finish para la
+# justificacion completa de cada decision. $1 = codigo de salida, $2 = senal.
+set -u
+svc=engram
+st=/tmp/robotina; mkdir -p "$st"
+now=$(date +%s); start=$(cat "$st/$svc.start" 2>/dev/null || echo 0)
+if [ $((now - start)) -ge 10 ]; then echo 0 > "$st/$svc.fail"; fi
+n=$(cat "$st/$svc.fail" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$st/$svc.fail"
+case $n in 1) s=1;; 2) s=2;; 3) s=4;; 4) s=8;; 5) s=16;; *) s=30;; esac
+echo "robotina: $svc salio (exit=$1 sig=${2:-0}); reinicio #$n en ${s}s" >&2
+sleep "$s"

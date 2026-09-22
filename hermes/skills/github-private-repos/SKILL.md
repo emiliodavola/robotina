@@ -1,66 +1,72 @@
 ---
 name: github-private-repos
-description: "Private GitHub repositories, and anything needing GitHub credentials (clone private, push, gh). This container deliberately has NO credentials; OpenCode holds gh plus a fine-grained PAT. Delegate there, and never ask the user for a token."
-version: 1.0.0
+description: "Private GitHub repositories and everything needing GitHub credentials (clone private, push, gh) from this container: gh is installed and GITHUB_TOKEN is wired as git's credential helper. A 404 is a token-permissions problem. Never ask the user for a token."
+version: 2.0.0
 author: robotina stack
 license: MIT
 platforms: [linux]
 metadata:
   hermes:
-    tags: [GitHub, Credentials, Private-Repos, Delegation, Security]
+    tags: [GitHub, Credentials, Private-Repos, Security]
     related_skills: [opencode-server]
 ---
 
 # GitHub: private repositories and credentials
 
-Verified capability split between the two containers:
+This container holds the credentials itself. The old split — one container with the
+credentials and another without — is retired: there is a single agent container now, and
+it can clone, fetch and push to private repositories directly.
 
-| | this container (`hermes`) | the `opencode` container |
-| --- | --- | --- |
-| `git` | yes (2.47) | yes (2.54) |
-| `gh` | **no** | yes (2.97) |
-| GitHub credential | **none** — no `GITHUB_TOKEN`, no credential helper, no `~/.config/gh` | yes — a fine-grained PAT in `GITHUB_TOKEN`, wired as git's credential helper |
-| Shared state | `/workspace` | `/workspace` |
+| Capability | This container |
+| --- | --- |
+| `git` | yes (2.47) |
+| `gh` | yes (2.97) |
+| GitHub credential | yes — a fine-grained PAT in `GITHUB_TOKEN`, wired as git's credential helper |
+| Shared state | `/workspace` |
 
 ## Rules
 
-1. **Never ask the user for a GitHub token.** The stack already holds one, in the
-   container that needs it. Asking for one is a regression: it happens when nothing
-   says where the credential lives.
+1. **Never ask the user for a GitHub token.** The stack already holds one, right here.
+   Asking for one is a regression: it happens when nothing says where the credential
+   lives.
 2. **Never write a token into a prompt, a file, a commit, or a session transcript.**
-   Do not ask OpenCode to print one either.
-3. **Public repositories: clone them here, over `https://` URLs.** `git` works through
-   the egress proxy without credentials. `git ls-remote https://github.com/<owner>/<repo>`
-   is a cheap check. `git@github.com:` does not work from here: this container has no
-   rewrite — that one lives in `opencode` — and ssh cannot reach the Internet through
-   the proxy, which allows `CONNECT` to port 443 only.
-4. **Private repositories, and anything that pushes: delegate to OpenCode.** It has
-   the credentials, and it shares `/workspace`.
-5. **A `404` on a private repo means "no credentials", not "no such repo".** GitHub
-   answers 404 for private repositories to unauthenticated requests. The conclusion is
-   "delegate", never "I need a new token".
+   Do not print it either.
+3. **Public repositories: clone them over `https://` URLs.** `git` works through the
+   egress proxy without credentials. `git ls-remote https://github.com/<owner>/<repo>`
+   is a cheap check. `git@github.com:` does not work from here: `ssh` cannot reach the
+   Internet through the proxy, which allows `CONNECT` to port 443 only.
+4. **Private repositories and pushes work directly from here** — `git` finds the helper
+   and `gh` finds `GITHUB_TOKEN` in the environment.
+5. **A `404` on a private repo is a token-permissions problem.** GitHub answers `404`
+   for private repositories the token does not cover, exactly as it does for
+   repositories that do not exist. Read it as "the token does not include this repo (or
+   it expired)", fix the token's repository scope on the host, and retry — never as a
+   request for a new token in the chat.
 
-## How to delegate a private clone
+## Recipes
 
-Ask OpenCode over its HTTP API — the mechanics, the auth flag and the pitfalls live in
-the `opencode-server` skill — to do the clone in the shared workspace. A prompt that
-works:
+Clone a private repository:
 
-> With `git` (credentials are already configured there), clone `<owner>/<repo>` into
-> `/workspace/<repo>` and tell me the HEAD commit. Do not touch anything else.
+```sh
+git clone https://github.com/<owner>/<repo> /workspace/<repo>
+```
 
-After that, `/workspace/<repo>` is a normal checkout for both containers: read it, edit
-it, build it here, and ask OpenCode to push when the work is done. If the repo is
-private and the clone comes back `404` **from OpenCode**, the PAT does not cover that
-repository or expired: report that to the user, with the exact repo, as a permissions
-problem — do not ask for a fresh token in the chat.
+Check what the token actually covers before blaming the network:
+
+```sh
+gh auth status
+gh repo view <owner>/<repo> --json nameWithOwner
+```
+
+If the clone returns `404`, run `gh repo view` for the same repo: a `404` there confirms
+a token-scope gap, while a `403` (`Write access to repository not granted.`) is GitHub
+refusing the write specifically.
 
 ## Troubleshooting
 
 | Symptom | Meaning |
 | --- | --- |
-| `404` on a private repo **from this container** | Expected: there are no credentials here. Delegate to OpenCode. |
-| `404` on a private repo **from OpenCode** | The PAT does not include that repo, or it expired. Report it as a permissions problem. |
+| `404` on a private repo | The PAT does not include that repo, or it expired. Report it as a token-permissions problem, with the exact repo. |
 | `403` with an HTML body | The host is not in the proxy allowlist. See the egress notes in the `opencode-server` skill. |
 | `403` with a git body (`Write access to repository not granted.`) | GitHub itself: the token does not cover that repository. A permissions problem, not an allowlist problem. |
 | `Permission denied` writing in `/workspace` | Ownership problem on the shared mount, not a credential problem. Report it; the host has `scripts/fix-permissions.ps1`. |
