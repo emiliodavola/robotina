@@ -1036,3 +1036,81 @@ the task-26 peak. Both are for `verify`/`archive` to carry, not blockers.
 
 Recommended next phase: **`sdd-archive`** (with `sdd-verify` explicitly optional). Delivery (T10:
 branch pushed, PR opened) stays a separate user decision; no commit/push/PR was performed by apply.
+
+## Follow-up — Hermes model config and `.env` shadowing (2026-09-22)
+
+Post-merge field defect on the live stack, fixed on branch `fix/model-config-and-env-names`
+(cut from `main`, which already contains the merged single-container change). Two independent
+root causes, both proven.
+
+### Symptom
+
+The Telegram bot answered with `HTTP 400 Model is unavailable` from the OpenCode Go relay and,
+after that, `HTTP 401 Invalid credential`.
+
+### Root cause 1 — Hermes had no usable model configuration
+
+`HOST_DATA_DIR` was empty on first boot, so the vendor seeded its default `config.yaml`:
+
+```yaml
+model:
+  provider: "auto"
+  base_url: "https://openrouter.ai/api/v1"
+  default: "anthropic/claude-opus-4.6"
+```
+
+That cannot work here. `openrouter.ai` is deliberately absent from the Squid allowlist, and with
+`provider: auto` Hermes resolves to the only provider with a credential present — `opencode-go` —
+whose catalog has no `anthropic/*` models. The repo never documented how to configure Hermes'
+model; the original change assumed "a provider key" was enough.
+
+### Root cause 2 — `.env` inputs shadowed by same-named shell variables
+
+Docker Compose gives the process environment precedence over the `.env` file. The stack's `.env`
+keys were `HERMES_OPENCODE_GO_API_KEY` and `OPENCODE_GO_API_KEY`, and the second is literally the
+vendor's own environment variable name, so a user with it exported silently got the stale
+credential. Proven by hashing: the container received a credential whose hash differed from the
+one `.env` held.
+
+### Fix
+
+- `compose.yml`: every `.env` input renamed to a `ROBOTINA_`-prefixed key (container-level names
+  unchanged). New non-secret model variables `ROBOTINA_HERMES_MODEL`,
+  `ROBOTINA_HERMES_MODEL_PROVIDER`, `ROBOTINA_HERMES_MODEL_BASE_URL` with OpenCode Go defaults.
+- `.env.example`: new key names, the three model variables documented with defaults, and the
+  shadowing trap plus the narrow `docker inspect --format` rule stated.
+- `robotina/s6/cont-init.d/30-robotina-model` (new): idempotent cont-init that points
+  `config.yaml` at the configured provider/endpoint/model via `hermes config set`. Skips keys
+  already equal to the desired value; warns loudly and exits 0 if `config.yaml` or the CLI is
+  missing; never logs a credential. Installed by the existing `cont-init.d/*` loop in
+  `robotina/Dockerfile` — no Dockerfile change needed.
+- `README.md` / `README.en.md`: key names updated, model configuration step added (now applied
+  automatically at startup, and how to override it), shell-export shadowing warning, and the
+  `squid/allowlist.txt` note for pointing Hermes at a different provider.
+- `SECURITY.md`: Compose process-environment precedence trap, and the `GET /config/providers`
+  plain-text credential serialization trap (a credential leaked through that endpoint during this
+  work; any credential so exposed must be rotated).
+
+### Measured verification (live stack, 2026-09-22)
+
+```text
+docker compose config -q                # exit 0
+docker compose build robotina           # exit 0 (cont-init installed + sh -n validated)
+env -u ROBOTINA_HERMES_MODEL_KEY -u ROBOTINA_OPENCODE_MODEL_KEY \
+  docker compose up -d --force-recreate robotina   # exit 0
+docker compose ps                       # robotina + egress-proxy, both (healthy)
+hermes config get model                 # default: deepseek-v4.1-flash
+                                        # provider: opencode-go
+                                        # base_url: https://opencode.ai/zen/go/v1
+hermes --cli -z "Respondé exactamente con: FUNCIONA. Nada mas."   # FUNCIONA.
+docker compose logs --tail 60 robotina | grep -iE "modelo|model"
+  # cont-init: info: running /etc/cont-init.d/30-robotina-model
+  # robotina: model.provider ya apunta al valor configurado; sin cambios
+  # robotina: model.base_url ya apunta al valor configurado; sin cambios
+  # robotina: model.default ya apunta al valor configurado; sin cambios
+  # cont-init: info: /etc/cont-init.d/30-robotina-model exited 0
+manual re-run of the cont-init      # exit 0, three "sin cambios", config.yaml mtime unchanged
+docker compose logs robotina | grep -F "[Telegram] Connected to Telegram"   # present
+```
+
+No commit, push, or PR was performed.

@@ -118,29 +118,57 @@ services**, this is what changed and why:
    ```
 
    ```ini
-   HOST_DATA_DIR=C:/robotina-data      # host folder that holds all the state
-   TELEGRAM_BOT_TOKEN=                 # from @BotFather
-   HERMES_OPENCODE_GO_API_KEY=         # model used by Hermes
-   OPENCODE_GO_API_KEY=                # model used by OpenCode
-   TELEGRAM_ALLOWED_USERS=             # optional: who may use the bot
-   OPENCODE_SERVER_PASSWORD=           # optional: HTTP Basic for the server
-   GITHUB_TOKEN=                       # optional: fine-grained PAT
+   HOST_DATA_DIR=C:/robotina-data          # host folder that holds all the state
+   ROBOTINA_TELEGRAM_BOT_TOKEN=            # from @BotFather
+   ROBOTINA_HERMES_MODEL_KEY=              # key used by Hermes
+   ROBOTINA_OPENCODE_MODEL_KEY=            # key used by OpenCode
+   ROBOTINA_TELEGRAM_ALLOWED_USERS=        # optional: who may use the bot
+   ROBOTINA_OPENCODE_SERVER_PASSWORD=      # optional: HTTP Basic for the server
+   ROBOTINA_GITHUB_TOKEN=                  # optional: fine-grained PAT
    ```
 
    The two model keys are published under distinct names on purpose:
-   `HERMES_OPENCODE_GO_API_KEY` reaches the Hermes process under the name the
-   vendor image expects, and `OPENCODE_GO_API_KEY` is re-exported by the
+   `ROBOTINA_HERMES_MODEL_KEY` reaches the Hermes process under the name the
+   vendor image expects, and `ROBOTINA_OPENCODE_MODEL_KEY` is re-exported by the
    `opencode` run script **only inside its own process**. `.env` is gitignored;
    its values are readable with `docker inspect`, an accepted risk documented in
    `SECURITY.md`.
 
-3. Build the agent image (the service references it as `robotina:local`):
+   **Why the names start with `ROBOTINA_`.** Docker Compose gives the process
+   environment precedence over `.env`. If you left a shell variable exported
+   under the same name as one of these keys — the real case was
+   `OPENCODE_GO_API_KEY`, the vendor's own name — that exported value silently
+   overrode `.env` and the container started with a stale credential. The
+   `ROBOTINA_` prefix does not exist in the host environment, so the collision is
+   impossible. In practice: **do not export these variables in your shell**; edit
+   `.env` and recreate the container.
+
+3. Configure Hermes' model (optional). The `30-robotina-model` cont-init applies
+   this configuration **automatically on every startup**, so you do not have to
+   edit `config.yaml` by hand. The defaults are already the OpenCode Go ones:
+
+   ```ini
+   ROBOTINA_HERMES_MODEL_PROVIDER=     # default: opencode-go
+   ROBOTINA_HERMES_MODEL_BASE_URL=     # default: https://opencode.ai/zen/go/v1
+   ROBOTINA_HERMES_MODEL=              # default: deepseek-v4.1-flash
+   ```
+
+   Leave them empty to use the defaults, or set an id from the plan's catalog to
+   change it (without the `opencode-go/` prefix). With this, Hermes points at
+   `opencode-go` instead of the `provider: auto` the vendor seeds, which cannot
+   work here: `openrouter.ai` is deliberately outside Squid's allowlist, and with
+   `auto` Hermes resolves to the only provider with a credential.
+   **If you point Hermes at another provider, that host also has to be in
+   `squid/allowlist.txt`**, or the request dies at the proxy. To change it on a
+   running stack, use the recipe under "Model and provider plan" below.
+
+4. Build the agent image (the service references it as `robotina:local`):
 
    ```bash
    docker compose build robotina
    ```
 
-4. Bring the stack up:
+5. Bring the stack up:
 
    ```bash
    docker compose up -d
@@ -151,20 +179,20 @@ services**, this is what changed and why:
    any service. A freshly created state folder ends up writable by uid 10000
    without your running anything privileged outside.
 
-5. Check that it came up:
+6. Check that it came up:
 
    ```bash
    docker compose ps
    docker compose exec robotina hermes status
    ```
 
-6. If you came from the previous layout, migrate the state (see "Migration").
+7. If you came from the previous layout, migrate the state (see "Migration").
 
-7. In BotFather, rename the bot's public **display name** to `robotina`. It is
+8. In BotFather, rename the bot's public **display name** to `robotina`. It is
    the only manual Telegram-side step: you do not need to change the public
    handle, and the token in `.env` stays the same. Message the bot. With
-   `TELEGRAM_ALLOWED_USERS` empty, Hermes answers unknown users with a pairing
-   code instead of obeying them: that list is the access control, not the
+   `ROBOTINA_TELEGRAM_ALLOWED_USERS` empty, Hermes answers unknown users with a
+   pairing code instead of obeying them: that list is the access control, not the
    network.
 
 ## Using it

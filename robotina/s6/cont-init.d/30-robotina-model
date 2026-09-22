@@ -1,0 +1,99 @@
+#!/command/with-contenv sh
+# =============================================================================
+# cont-init de robotina: apunta el modelo de Hermes al proveedor correcto.
+#
+# Corre como root y DESPUES del hook del vendor. s6-overlay ejecuta
+# /etc/cont-init.d/* en orden lexicografico, asi que el orden real es:
+#   01-hermes-setup -> ... -> 10-robotina-state -> 20-robotina-identity -> ESTE.
+# El prefijo 30 garantiza que 01-hermes-setup (que SIEMBRA config.yaml con el
+# default del vendor) ya corrio, y que este script termina ANTES de que arranque
+# el programa principal (`gateway run`): asi la ultima palabra sobre `model.*`
+# es nuestra y no peleamos contra stage2-hook.sh.
+#
+# Por que existe: la config que siembra el vendor (`model.provider: auto`,
+# `model.base_url` de openrouter y un modelo `anthropic/*`) NO puede funcionar en
+# este stack. openrouter.ai esta fuera de la allowlist de Squid a proposito, y
+# con `auto` Hermes resuelve al unico proveedor con credencial presente
+# (opencode-go), cuyo catalogo no tiene modelos anthropic. Resultado observado:
+# HTTP 400 "Model is unavailable" seguido de HTTP 401 "Invalid credential". El
+# modelo tiene que quedar APUNTADO de forma no interactiva y sobrevivir a los
+# reinicios y a una carpeta de estado recien creada en el host.
+#
+# Entradas (NO son secretos; los defaults son los de OpenCode Go):
+#   ROBOTINA_HERMES_MODEL_PROVIDER -> model.provider (default opencode-go)
+#   ROBOTINA_HERMES_MODEL_BASE_URL -> model.base_url (default https://opencode.ai/zen/go/v1)
+#   ROBOTINA_HERMES_MODEL          -> model.default  (default deepseek-v4.1-flash)
+#
+# Nunca es fatal: si todavia no hay config, o el CLI no esta, se avisa fuerte y
+# se devuelve 0. Un arranque NO se rompe por un detalle de configuracion. Este
+# script NUNCA toca ni loguea credenciales: solo escribe strings de
+# proveedor/endpoint/modelo.
+# =============================================================================
+set -u
+
+CONFIG=/opt/data/config.yaml
+CLI=/opt/hermes/bin/hermes
+
+PROVIDER="${ROBOTINA_HERMES_MODEL_PROVIDER:-opencode-go}"
+BASE_URL="${ROBOTINA_HERMES_MODEL_BASE_URL:-https://opencode.ai/zen/go/v1}"
+MODEL="${ROBOTINA_HERMES_MODEL:-deepseek-v4.1-flash}"
+
+# --- 1. Sin config o sin CLI no hay nada que fijar ---------------------------
+# Paso normal en una carpeta de estado nueva: el vendor siembra config.yaml en su
+# propio hook; si por lo que sea todavia no existe, no hay nada que escribir.
+if [ ! -f "$CONFIG" ]; then
+  echo "robotina: AVISO: $CONFIG no existe todavia; no se puede apuntar el modelo (Hermes usara el default del vendor)" >&2
+  exit 0
+fi
+
+if [ ! -x "$CLI" ]; then
+  echo "robotina: AVISO: no se encontro el CLI de Hermes ($CLI); no se puede apuntar el modelo" >&2
+  exit 0
+fi
+
+# --- 2. Set por clave, idempotente ------------------------------------------
+# Cada clave se escribe SOLO si su valor actual difiere del deseado. El guard lee
+# la primera linea NO comentada del YAML (`^[[:space:]]*clave:`) y no la config de
+# ejemplo comentada que trae el archivo del vendor. Asi se evita churn (y el bump
+# de mtime que dispara el watcher de config) en cada arranque, y el script es
+# re-ejecutable a mano sin cambiar nada. Si el usuario cambio la clave a otro
+# valor a mano, este script la vuelve al valor configurado: esa es la politica.
+#
+# La escritura va por el CLI del vendor (`hermes config set`), que serializa el
+# YAML igual que el resto del archivo. Se corre como el uid de la app (10000) con
+# HOME=/opt/data, igual que el resto del estado del agente. PATH explicito con
+# /command porque cont-init no depende del PATH heredado (los binarios s6 viven
+# ahi y el CLI en /opt/hermes/bin).
+set_key() {
+  key="$1"
+  desired="$2"
+  leaf="$3"
+  # Extrae el valor actual de la primera linea no comentada de esa clave. Se
+  # compara como string contra el deseado: nada de armar regex con el valor, que
+  # es donde se cuelan los bugs de escaping. Quita comillas si el YAML las usa.
+  current="$(awk -v k="$leaf" '
+    $0 ~ "^[[:space:]]*" k ":" {
+      line=$0
+      sub("^[[:space:]]*" k "[[:space:]]*:[[:space:]]*", "", line)
+      sub(/[[:space:]]*$/, "", line)
+      if (line ~ /^".*"$/) { line = substr(line, 2, length(line)-2) }
+      print line
+      exit
+    }' "$CONFIG")"
+  if [ "$current" = "$desired" ]; then
+    echo "robotina: $key ya apunta al valor configurado; sin cambios" >&2
+    return 0
+  fi
+  if PATH="/command:$PATH" s6-setuidgid hermes env HOME=/opt/data \
+       "$CLI" config set "$key" "$desired"; then
+    echo "robotina: $key configurado" >&2
+  else
+    echo "robotina: AVISO: no se pudo configurar $key; se continua (Hermes usara el valor previo)" >&2
+  fi
+}
+
+set_key model.provider "$PROVIDER" provider
+set_key model.base_url "$BASE_URL" base_url
+set_key model.default  "$MODEL"    default
+
+exit 0

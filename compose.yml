@@ -18,6 +18,15 @@
 # con `docker inspect`. Materializarlas como archivos requiere envolver los
 # entrypoints de las imagenes.
 #
+# Nombres de las entradas: TODAS las entradas que vienen de `.env` llevan el
+# prefijo `ROBOTINA_`. Docker Compose le da PRECEDENCIA al entorno del proceso
+# por sobre el `.env`: si en el shell quedo exportada una variable con el mismo
+# nombre que una de estas claves (el caso real fue `OPENCODE_GO_API_KEY`, el
+# nombre propio del vendor), ese valor exportado pisa en silencio al del `.env`
+# y el contenedor recibe una credencial vieja. Un prefijo que el host no usa
+# elimina la colision. Los nombres INTERNOS (a la izquierda de cada linea de
+# `environment:`) NO cambian: son los que espera cada componente adentro.
+#
 # Persistencia: el estado del agente (configuracion de Hermes y de opencode,
 # identidad de git, memoria de engram y el workspace) vive en carpetas del host
 # bajo HOST_DATA_DIR, no en volumenes nombrados de Docker. Son visibles,
@@ -122,25 +131,36 @@ services:
     environment:
       <<: *egress-env
       TZ: America/Argentina/Buenos_Aires
-      # Hermes usa su clave con el nombre exacto que espera la imagen vendor.
-      OPENCODE_GO_API_KEY: ${HERMES_OPENCODE_GO_API_KEY:?definir HERMES_OPENCODE_GO_API_KEY en .env}
+      # Las entradas `${...}` vienen de `.env` y llevan prefijo `ROBOTINA_` por
+      # el shadowing descrito arriba. Hermes usa su clave con el nombre exacto
+      # que espera la imagen vendor.
+      OPENCODE_GO_API_KEY: ${ROBOTINA_HERMES_MODEL_KEY:?definir ROBOTINA_HERMES_MODEL_KEY en .env}
       # La clave de opencode viaja bajo un nombre propio: el run script de su
       # servicio la exporta como OPENCODE_GO_API_KEY SOLO para su proceso (nunca
       # se parchea un archivo del vendor).
-      ROBOTINA_OPENCODE_GO_API_KEY: ${OPENCODE_GO_API_KEY:?definir OPENCODE_GO_API_KEY en .env}
+      ROBOTINA_OPENCODE_GO_API_KEY: ${ROBOTINA_OPENCODE_MODEL_KEY:?definir ROBOTINA_OPENCODE_MODEL_KEY en .env}
       # Telegram
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?definir TELEGRAM_BOT_TOKEN en .env}
+      TELEGRAM_BOT_TOKEN: ${ROBOTINA_TELEGRAM_BOT_TOKEN:?definir ROBOTINA_TELEGRAM_BOT_TOKEN en .env}
       # Quien puede hablarle al bot. Vacio (default) = fail closed: Hermes manda
       # un codigo de pairing a los DM desconocidos y los rechaza hasta que se
       # aprueben. Para autorizarte sin abrir el dashboard, pon tu ID numerico
       # de Telegram (te lo da @userinfobot) en .env:
-      #   TELEGRAM_ALLOWED_USERS=123456789
-      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+      #   ROBOTINA_TELEGRAM_ALLOWED_USERS=123456789
+      TELEGRAM_ALLOWED_USERS: ${ROBOTINA_TELEGRAM_ALLOWED_USERS:-}
       # Token de GitHub (decision D3): `gh` y el credential helper de git lo
       # leen de aca, sin `gh auth login`. Riesgo asumido: el agente que habla por
       # Telegram ahora comparte contenedor con este token, y el token es legible
       # con `docker inspect`.
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_TOKEN: ${ROBOTINA_GITHUB_TOKEN:-}
+      # Modelo de Hermes (NO son secretos). Los consume el cont-init
+      # 30-robotina-model, que apunta `config.yaml` a este proveedor, endpoint y
+      # modelo. Si no se definen en .env, se usan los defaults entre parentesis.
+      # Provider explicito (`opencode-go`) en vez de `auto`: con `auto` Hermes
+      # resuelve al unico proveedor con credencial y adivina, y los errores se
+      # vuelven indescifrables.
+      ROBOTINA_HERMES_MODEL: ${ROBOTINA_HERMES_MODEL:-deepseek-v4.1-flash}
+      ROBOTINA_HERMES_MODEL_PROVIDER: ${ROBOTINA_HERMES_MODEL_PROVIDER:-opencode-go}
+      ROBOTINA_HERMES_MODEL_BASE_URL: ${ROBOTINA_HERMES_MODEL_BASE_URL:-https://opencode.ai/zen/go/v1}
       # Sin prompts interactivos de credenciales: falla rapido en lugar de
       # quedarse esperando una respuesta que nunca va a llegar.
       GIT_TERMINAL_PROMPT: "0"
@@ -148,7 +168,7 @@ services:
       # el puerto es loopback-only, asi que ningun par de red lo alcanza. Vacio
       # = servidor sin autenticar. Poniendo el mismo valor en .env, Hermes y el
       # run script de opencode lo usan para hablarle.
-      OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:-}
+      OPENCODE_SERVER_PASSWORD: ${ROBOTINA_OPENCODE_SERVER_PASSWORD:-}
       # Rutas, no configuracion por proceso: las necesitan tambien los `exec`
       # de operador (git config --global, engram export, go env).
       ENGRAM_DATA_DIR: /opt/data/.engram
