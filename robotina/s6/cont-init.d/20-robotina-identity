@@ -1,0 +1,63 @@
+#!/command/with-contenv sh
+# =============================================================================
+# cont-init de robotina: deja seleccionada la skin de identidad `robotina`.
+#
+# Corre como root y DESPUES del hook del vendor. s6-overlay ejecuta
+# /etc/cont-init.d/* en orden lexicografico, asi que el orden real es:
+#   01-hermes-setup -> ... -> 10-robotina-state -> ESTE.
+# El prefijo 20 garantiza que 01-hermes-setup (que siembra config.yaml) ya corrio,
+# y que este script termina ANTES de que arranque el programa principal
+# (`gateway run`): asi la ultima palabra sobre `display.skin` es nuestra y no
+# peleamos contra stage2-hook.sh.
+#
+# Por que existe (ID2): la identidad tiene que quedar elegida SIN interaccion y
+# SOBREVIVIR a los reinicios y a una carpeta de estado recien creada en el host.
+# La skin en si viene read-only del repo; lo unico que falta persistir es el
+# puntero `display.skin` en el estado de Hermes.
+#
+# Nunca es fatal: la identidad garantizada es el archivo de contexto
+# /workspace/.hermes.md; si no hay config todavia, o el CLI falla, se avisa fuerte
+# y se devuelve 0. Un arranque NO se rompe por cosmeticos.
+# =============================================================================
+set -u
+
+CONFIG=/opt/data/config.yaml
+
+# --- 1. Sin config no hay puntero que fijar ----------------------------------
+# Paso normal en una carpeta de estado nueva: el vendor siembra config.yaml en su
+# propio hook, pero si por lo que sea todavia no existe, no hay nada que escribir.
+if [ ! -f "$CONFIG" ]; then
+  echo "robotina: AVISO: $CONFIG no existe todavia; no se puede fijar display.skin=robotina (la identidad del contexto .hermes.md sigue vigente)" >&2
+  exit 0
+fi
+
+# --- 2. Idempotencia: si ya esta seleccionada, no se escribe ------------------
+# Evita churn (y el bump de mtime que dispara el watcher de skins) en cada
+# arranque, y evita pelear con una config que el usuario haya cambiado a mano.
+if grep -Eq '^[[:space:]]*skin:[[:space:]]*robotina[[:space:]]*$' "$CONFIG"; then
+  exit 0
+fi
+
+# --- 3. Seleccion via el CLI del vendor --------------------------------------
+# `hermes config set display.skin` es el mecanismo propio del vendor: ademas de
+# escribir la clave, bumpea el mtime de la skin para que el watcher del gateway
+# repinte las superficies vivas. Se corre como el uid de la app (10000) con
+# HOME=/opt/data, igual que el resto del estado del agente.
+#
+# PATH: los binarios s6 viven en /command y el CLI en /opt/hermes/bin; se
+# explicita /command porque cont-init no depende del PATH heredado.
+#
+# Fallback documentado (si el CLI cambiara de superficie): el equivalente con el
+# YAML vendorizado es
+#   PATH=/command:$PATH s6-setuidgid hermes env HOME=/opt/data \
+#     /opt/hermes/.venv/bin/python -c \
+#     'import yaml,pathlib; p=pathlib.Path("/opt/data/config.yaml"); d=yaml.safe_load(p.read_text()) or {}; d.setdefault("display",{})["skin"]="robotina"; p.write_text(yaml.safe_dump(d,sort_keys=False))'
+# Manteniendo los mismos guards (pasos 1 y 2) y el mismo observable.
+if PATH="/command:$PATH" s6-setuidgid hermes env HOME=/opt/data \
+     hermes config set display.skin robotina; then
+  echo "robotina: skin de identidad 'robotina' seleccionada (display.skin)" >&2
+else
+  echo "robotina: AVISO: no se pudo fijar display.skin=robotina; se continua (la identidad del contexto .hermes.md sigue vigente)" >&2
+fi
+
+exit 0

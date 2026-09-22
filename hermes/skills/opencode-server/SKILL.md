@@ -1,45 +1,42 @@
 ---
 name: opencode-server
-description: "Delegate coding to the OpenCode HTTP server in the sibling container (there is no opencode CLI here): verified API, server-password auth, model routing, troubleshooting. For private GitHub repos and credentials, see the github-private-repos skill."
-version: 1.1.0
+description: "Drive the OpenCode server that runs inside this same container (loopback http://127.0.0.1:4096): verified API, server-password auth, model routing, troubleshooting. For private GitHub repos and credentials, see the github-private-repos skill."
+version: 2.0.0
 author: robotina stack
 license: MIT
 platforms: [linux]
 metadata:
   hermes:
-    tags: [Coding-Agent, OpenCode, Delegation, HTTP]
+    tags: [Coding-Agent, OpenCode, Delegation, HTTP, Local]
     related_skills: [github-private-repos, opencode]
 ---
 
-# OpenCode server (remote coding delegate)
+# OpenCode server (in-container coding delegate)
 
-OpenCode does **not** run inside this container. There is no `opencode` binary here,
-so `which -a opencode` fails and the bundled `opencode` skill — which assumes the
-CLI is local — does not apply. A sibling container runs `opencode serve` and is
-reachable at `http://opencode:4096`. Both containers mount the same `/workspace`,
-so anything it writes is visible here immediately, and vice versa.
+The OpenCode server runs **inside this same container**. `opencode serve` listens on
+`http://127.0.0.1:4096`, the `opencode` CLI is installed here too, and both share this
+filesystem — anything the server writes is visible to you immediately, and vice versa.
+There is no second agent: the endpoint is local, not a peer host.
 
 ## When to use
 
 - The user asks for OpenCode by name, or wants a second coding agent on the same files.
 - A coding task is worth running as its own agent, with its own model and its own cost.
-- Any task that needs GitHub credentials: see the `github-private-repos` skill.
+- Any task that needs a long-running agent loop you do not want to block your own turn on.
 
 ## Do not
 
-- Do not try to install or run the OpenCode CLI in this container. Use the HTTP API.
 - Do not hardcode `OPENCODE_SERVER_PASSWORD` anywhere, and never print it in output.
-- **GitHub credentials do not exist here on purpose.** For private repos, pushes and
-  anything needing `gh`, follow the `github-private-repos` skill instead of asking the
-  user for a token.
 - Do not assume new outbound hosts will work: this container has **no direct Internet**.
   Everything external goes through `egress-proxy` with a domain allowlist. A task that
   needs a new host means editing `squid/allowlist.txt` on the host and restarting the
   proxy — report that to the user instead of working around it.
+- Do not point at a peer host name: the endpoint is loopback only and is not published to
+  any other container or to the host.
 
-## API (verified against OpenCode 1.18.31)
+## API (verified against OpenCode 1.18.32)
 
-Full OpenAPI spec: `GET http://opencode:4096/doc`. Liveness: `GET /global/health`.
+Full OpenAPI spec: `GET http://127.0.0.1:4096/doc`. Liveness: `GET /global/health`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -68,7 +65,7 @@ The response is `{"info": {...}, "parts": [...]}` — the answer is the `text` i
 
 The reply also comes as an event stream on `GET /event` (SSE) if you need progress.
 
-## Authentication (the server password, not GitHub)
+## Authentication (the server password)
 
 The server enforces HTTP Basic **only if** it was started with
 `OPENCODE_SERVER_PASSWORD`. Credentials are username `opencode` and that password as
@@ -81,7 +78,7 @@ character it contains:
 ```sh
 set --
 [ -n "$OPENCODE_SERVER_PASSWORD" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"
-curl -s "$@" http://opencode:4096/global/health
+curl -s "$@" http://127.0.0.1:4096/global/health
 ```
 
 Do **not** do `AUTH="-u opencode:$OPENCODE_SERVER_PASSWORD"` and then `curl $AUTH`:
@@ -97,12 +94,12 @@ Send one task and read the answer:
 set --
 [ -n "$OPENCODE_SERVER_PASSWORD" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"
 
-SID=$(curl -s "$@" -X POST http://opencode:4096/session \
+SID=$(curl -s "$@" -X POST http://127.0.0.1:4096/session \
         -H 'Content-Type: application/json' \
-        -d '{"title":"task from Hermes"}' \
+        -d '{"title":"task from robotina"}' \
       | sed -n 's/.*"id":"\(ses_[^"]*\)".*/\1/p')
 
-curl -s "$@" -X POST "http://opencode:4096/session/$SID/message" \
+curl -s "$@" -X POST "http://127.0.0.1:4096/session/$SID/message" \
   -H 'Content-Type: application/json' \
   -d '{"model":{"providerID":"opencode","modelID":"mimo-v2.5-free"},
        "parts":[{"type":"text","text":"Add retry logic to the HTTP client and run the tests"}]}' \
@@ -123,16 +120,15 @@ part, so a transport timeout does not look like a failure.
 `GET /config/providers` lists what the server can actually use. As configured, only
 the `opencode/*` free tier is authenticated inside OpenCode (`opencode/mimo-v2.5-free`,
 `opencode/nemotron-3-ultra-free`, `opencode/muse-spark-1.3-contributor-free`, …).
-It is a sibling agent on the same workspace: it can read and write the same files
-you can, and it cannot reach the Internet except through the same allowlisted proxy.
+It can read and write the same files you can, and it cannot reach the Internet
+except through the same allowlisted proxy.
 
 ## Troubleshooting
 
 | Symptom | Cause |
 | --- | --- |
-| `Connection refused` | The opencode container is stopped or still starting. |
+| `Connection refused` | The server is stopped or still starting. Check `s6-svstat /run/service/opencode`. |
 | `401` | A password is set on the server and the request did not send it — or it sent it with an unquoted `$AUTH` expansion. Use the `set --` pattern above. |
-| `403` with an HTML body mentioning Squid | The URL host is not in `NO_PROXY`, so the call went through the proxy and the allowlist denied it. Use the `opencode` service name. |
+| `403` with an HTML body mentioning Squid | The URL host is not in `NO_PROXY`, so the call went through the proxy and the allowlist denied it. Use `127.0.0.1`. |
 | `Model ... is not supported` | Pick a `modelID` that `GET /config/providers` actually lists. |
 | `MCP error -32000: Connection closed` on an MCP server | That server's process died at startup. For local ones, run its command by hand inside the container to see the real error. |
-| `Permission denied` writing in `/workspace` | Ownership problem on the shared mount, not a server problem. Report it; the host has `scripts/fix-permissions.ps1`. |

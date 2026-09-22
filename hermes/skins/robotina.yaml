@@ -1,0 +1,21 @@
+# Identity skin for this stack: the agent is `robotina`.
+#
+# Schema derived from the vendor-bundled sample skin at
+# /opt/hermes/skills/autonomous-ai-agents/hermes-agent/templates/skin.yaml, whose
+# top-level keys are `name` / `description` / `colors` / `branding` / `tool_prefix`.
+# Keys that are NOT declared here are inherited from the built-in `default` skin:
+# hermes_cli/skin_engine.py::_build_skin_config merges our `branding` block over the
+# default one, so setting the displayed name is enough — there is no need to copy the
+# palette. The file is loaded from get_hermes_home()/skins/<name>.yaml, keyed by the
+# top-level `name`.
+#
+# Mounted read-only at /opt/data/skins/robotina.yaml: the agent cannot rewrite its own
+# identity. The selection is persisted as `display.skin` by the cont-init
+# 20-robotina-identity, not here.
+
+name: robotina
+description: Identity skin for the robotina stack — one agent, local OpenCode endpoint
+
+branding:
+  # Displayed agent name, read by cli_render (compact banner) and the TUI mixin.
+  agent_name: robotina
