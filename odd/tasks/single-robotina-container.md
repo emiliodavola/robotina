@@ -137,6 +137,11 @@ Frozen by the user after the explore phase:
   capped backoff for the longruns, keep `OPENCODE_SERVER_PASSWORD` (defense-in-depth),
   `robotina/` replaces `opencode/` with s6 sources under `robotina/s6/`, engram logs to the
   container stream, migration via a host-side helper, nesting proof with escalation path.
+- 2026-09-22: `sdd-apply` slice 07 (docs) — both READMEs rewritten for the single-container
+  reality (topology, build, removed host permission step, copy-forward migration plus its POSIX
+  equivalent, export-before-migrate safety net, BotFather display name only, in-container
+  operator recipes, persistence table, measured versions, uid-10000 assumption);
+  `scripts/fix-permissions.ps1` deleted (Q7 resolved).
 
 ## Delivery plan (decided at sdd-tasks)
 - Strategy: **chained PRs**; chain strategy: **`feature-branch-chain`**.
@@ -210,6 +215,11 @@ Forecast recorded by `sdd-tasks`: process artifacts 4,734 lines; implementation 
 - **Q7 — `scripts/fix-permissions.ps1`**: the user cancelled the choice. Not decided, not
   invented. Interim safe default from design §8.4: keep the file with a "superseded" header
   and drop it from the setup instructions. Revisit before `sdd-apply` closes.
+- **Q7 — RESOLVED in slice 07 (user decision):** `scripts/fix-permissions.ps1` is **deleted**.
+  The container-side cont-init (`robotina/s6/cont-init.d/10-robotina-state`) fixes ownership on
+  every start, and a host-side root helper on unpinned `alpine` with the host state bind mounted
+  is a documented trap with no remaining benefit. `git rm` staged the deletion; neither README
+  references it any more.
 - **F1 (found in slice 02)**: task 45's secret-leak grep is unsatisfiable as written — the
   repository already has 28 benign matches from documentation placeholders and shell variable
   references. Needs a value-shaped refinement before that task can pass.

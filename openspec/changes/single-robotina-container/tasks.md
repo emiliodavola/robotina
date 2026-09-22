@@ -544,7 +544,7 @@ inferred.
     `git grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=.+' -- ':!*.example'`
     (no output).
 
-- [ ] 33. Rewrite `README.md` (Spanish) and `README.en.md` (English) **in the same commit**
+- [x] 33. Rewrite `README.md` (Spanish) and `README.en.md` (English) **in the same commit**
   with: the one-container topology, the build step, the removal of the host permission step,
   the copy-forward migration step plus the documented POSIX equivalent, the safety-net note to
   run `scripts/export-state.sh` before migrating, the BotFather step as **display name only**
@@ -708,6 +708,13 @@ inferred.
   measurement-dependent tasks cannot complete without a running merged container).
 - `scripts/fix-permissions.ps1` stays in the tree with its `superseded` header (task 31);
   deletion requires explicit user confirmation and is not part of this change's task list.
+- **Slice 07 update (apply):** the user confirmed the Q7 deletion, so
+  `scripts/fix-permissions.ps1` was removed with `git rm` in the docs slice. The container-side
+  cont-init (`robotina/s6/cont-init.d/10-robotina-state`) replaces it. Task 31's historical
+  interim text above is preserved; the file itself no longer exists.
+- **Slice 07 update (apply):** `scripts/migrate-state.ps1`'s header comment was reworded to drop
+  the banned two-container phrasing (agent-container AC9's grep covers `scripts/`). Comment only;
+  no behaviour changed.
 - The five proof defects reported in design §19 are already reflected in the spec recipes;
   tasks 19 and 21 close the two remaining apply obligations, and task 40 records the observed
   gate behaviour.
