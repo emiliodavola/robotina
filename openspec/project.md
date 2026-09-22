@@ -26,7 +26,7 @@ not "nothing happens" but **bounded blast radius**.
 
 | Service | Image | Notes |
 | --- | --- | --- |
-| `robotina` | `robotina:local` (built from `robotina/Dockerfile` over the vendor base) | The merged agent. Runs **s6-overlay as PID 1** (so no `init: true`), app uid 10000, `cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]`. Hosts `opencode serve` on loopback, `engram`, and the Hermes Telegram gateway as s6 services. Carries the OpenCode toolchain (node/npm, uv + Python 3.13, R + `languageserver`, `gh`, engram, gentle-ai, codegraph, six LSP servers) plus `git`/`curl`/`python3`. Has `gh` **and** `GITHUB_TOKEN` (the retired "Hermes has no GitHub credential" invariant stays retired). |
+| `robotina` | `robotina:local` (built from `robotina/Dockerfile` over the vendor base) | The merged agent. Runs **s6-overlay as PID 1** (so no `init: true`), app uid 10000, `cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]` (six capabilities, bounding mask `0xeb`). Hosts `opencode serve` on loopback, `engram`, and the Hermes Telegram gateway as s6 services. Carries the OpenCode toolchain (node/npm, uv + Python 3.13, R + `languageserver`, `gh`, engram, gentle-ai, codegraph, six LSP servers) plus `git`/`curl`/`python3`. Has `gh` **and** `GITHUB_TOKEN` (the retired "Hermes has no GitHub credential" invariant stays retired). |
 | `egress-proxy` | `ubuntu/squid:latest` | Sole container with Internet egress. uid 13, read-only rootfs, tmpfs for logs/cache. **Stays separate** — not part of the merge. |
 
 ## Networks and persistence
@@ -79,9 +79,10 @@ openspec/                    # SDD artifacts (this directory)
 1. **The entrypoint owns PID 1.** The container runs s6-overlay and its entrypoint only
    `exec /init` when `$$ -eq 1`. Adding `init: true` or another PID 1 degrades it
    (`skipping s6-overlay /init ... Supervised services are unavailable`).
-2. **s6 needs five capabilities** under `cap_drop: [ALL]`; without them startup dies at
-   `s6-applyuidgid: fatal: unable to set supplementary group list`. The uid-10000 OpenCode
-   process keeps none of them (`CapEff = 0x0`).
+2. **s6 needs six capabilities** under `cap_drop: [ALL]` (bounding mask `0xeb`); without them
+   startup dies at `s6-applyuidgid: fatal: unable to set supplementary group list`. `KILL` was
+   added at apply (design §13.3) so the root supervisors can signal their uid-10000 children; the
+   uid-10000 OpenCode process keeps none of them (`CapEff = 0x0`).
 3. **The vendor image rejects uid 0 (and arbitrary `user:`).** It validates `HERMES_UID`
    1–65534 and silently discards 0, so uid alignment is done on the OpenCode side (uid 10000)
    — both processes share `/workspace` and, with `cap_drop: ALL`, a process without

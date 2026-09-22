@@ -170,6 +170,19 @@ Frozen by the user after the explore phase:
   claim in `README.md`/`README.en.md` (and their stale `CapBnd=0xcb`), and added the
   MEASURED-CORRECTION note to `explore.md` leaving its findings verbatim. `compose.yml` was **not**
   edited; no commit, push or PR was performed.
+- 2026-09-22: `sdd-apply` slice 12 (final verification + rollback safety) — **tasks 42, 43, 44 and
+  45 closed; all 45 tasks complete**. Task 42 ran the end-to-end suite on the final tree
+  (`docker compose config -q && build && up -d && ps` → exactly `robotina` + `egress-proxy`, both
+  healthy) and the credential-aware loopback probe (HTTP **200**, `{"healthy":true,"version":"1.18.32"}`;
+  plain probe **401**). Task 43 confirmed `squid/` byte-identical vs the merge base (`ceef812`),
+  `NO_PROXY`/`no_proxy` carrying `robotina`/`127.0.0.1`/`egress-proxy`, the mandatory `HOST_DATA_DIR`
+  guard refusing to start without it, and no loopback endpoint traffic in the proxy log. Task 44
+  confirmed both state volume names unchanged and `scripts/fix-permissions.ps1` deleted (no output);
+  the three legacy host folders are **not observable** (they never existed on this host) and are
+  recorded as such. Task 45 ran the value-shaped secret audit (no output), the container-log grep (no
+  output), the `.env` ignored/untracked check and the CR4 authoring rule (no violations). Also fixed
+  A2 (`openspec/project.md` five→six capabilities, `0xeb`) and F1 (task 45's literal grep replaced by
+  the value-shaped form, reason recorded). No commit, push or PR was performed.
 
 ## Delivery plan (decided at sdd-tasks)
 - Strategy: **chained PRs**; chain strategy: **`feature-branch-chain`**.
@@ -194,15 +207,15 @@ Frozen by the user after the explore phase:
 | S6 migration & scripts | `feat/single-robotina-container-06-scripts` | `92e1a31` | 194 | committed |
 | S7 docs | `feat/single-robotina-container-07-docs` | `fd016b3` | 726 (README pair 679) | committed; `scripts/fix-permissions.ps1` deleted (Q7) |
 | S8 records | `feat/single-robotina-container-08-records` | `ddbc0c2` | 968 (SECURITY.md 729) | committed (tasks 34–37, 39) |
-| S9 runtime verify | `feat/single-robotina-container-09-measurements` | — (uncommitted) | — | in progress: tasks 21, 22, 27 verified; **28 lifecycle proof FAILED** (see Slice 09) |
-| S10 capability fix | `feat/single-robotina-container-10-capkill` | committed | — | committed (task 28 closed: six capabilities, corrected lifecycle) |
-| S11 measurement evidence | `feat/single-robotina-container-11-evidence` | — (uncommitted) | — | **tasks 26, 38, 40, 41 closed**; stale lifecycle/`0xcb` claims corrected; out of scope: 42–45 |
+| S9 runtime verify | `feat/single-robotina-container-09-measurements` | `175e681` | — | committed: tasks 21, 22, 27 verified; **28 lifecycle proof FAILED** (closed in S10) |
+| S10 capability fix | `feat/single-robotina-container-10-capkill` | `7d9c3d6` | — | committed (task 28 closed: six capabilities, corrected lifecycle) |
+| S11 measurement evidence | `feat/single-robotina-container-11-evidence` | `2f0da36` | 390 | committed: **tasks 26, 38, 40, 41 closed**; stale lifecycle/`0xcb` claims corrected |
+| S12 final verify | `feat/single-robotina-container-12-final` | — (this run) | 373 | **tasks 42, 43, 44, 45 closed** — end-to-end suite, frozen egress + mandatory-input guard, rollback path, secret audit |
 
-Task progress: **41/45** implementation tasks complete (12 through slice 04; +7 in slice 05:
+Task progress: **45/45** implementation tasks complete (12 through slice 04; +7 in slice 05:
 tasks 17–20, 23–25; +4 in slice 06: 13–16; +4 in slice 07: 29–32; +1 in slice 07: 33; +5 in slice
 08: 34–37, 39; +3 in slice 09: **21, 22, 27**; +1 in slice 10: **28**; +4 in slice 11: **26, 38, 40,
-41**). Remaining: **42–45** (the end-to-end suite, the egress/rollback checks and the final secret
-audit), reported but not started by slice 11.
+41**; +4 in slice 12: **42, 43, 44, 45**). **No tasks remain.**
 
 Verified so far without a live stack: `docker compose config -q`, `--services`,
 `docker compose build robotina` (exit 0), `docker build --check`, `s6-rc-compile` +
@@ -855,21 +868,142 @@ logs: "[Telegram] Connected to Telegram (polling mode)"
   decision, not an apply edit.
 - Task 26 (peak `pids.current`), 38, 40, 41 and 42–45 were **not** started, per the slice scope.
 
+## Slice 12 — final verification and rollback safety (tasks 42–45)
+
+Branch: `feat/single-robotina-container-12-final` (cut from slice 11's tip `2f0da36` under
+`feature-branch-chain`, tracker `feat/single-robotina-container`). This slice is **verification
+only** — no production code changed. It closes the last four tasks and makes two record alignments
+(A2 in `openspec/project.md`, F1 in `tasks.md`).
+
+### Task 42 — end-to-end verification suite on the final tree
+
+```text
+$ docker compose config -q                                             # exit 0
+$ docker compose build                                                 # exit 0, "Image robotina:local Built" (log /tmp/robotina-s12-build.log)
+$ docker compose up -d                                                 # exit 0; robotina Recreated + Started
+$ docker compose ps
+NAME           IMAGE                 COMMAND                  SERVICE        CREATED          STATUS
+egress-proxy   ubuntu/squid:latest   "entrypoint.sh -f /e…"   egress-proxy   57 minutes ago   Up 57 minutes (healthy)
+robotina       robotina:local        "/opt/hermes/docker/…"   robotina       17 seconds ago   Up (health: starting)
+# after ~4 s: robotina Up (healthy)
+$ docker compose exec -T robotina sh -c 'set --; [ -n "${OPENCODE_SERVER_PASSWORD:-}" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"; curl -fsS "$@" -m 5 http://127.0.0.1:4096/global/health'
+{"healthy":true,"version":"1.18.32"}                                    # exit 0
+# credential-aware status code
+$ ... curl -s -o /dev/null -w "%{http_code}\n" "$@" .../global/health   # 200
+# plain probe (no -u) — assert the HTTP CODE, not curl's exit (curl without -f exits 0 on a 401)
+$ docker compose exec -T robotina sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -m 5 http://127.0.0.1:4096/global/health'
+401
+$ docker compose exec -T robotina sh -c 'ss -ltn | grep 4096'          # LISTEN 127.0.0.1:4096 only
+$ docker compose exec -T robotina sh -c 'tr "\0" " " < /proc/1/cmdline'
+/package/admin/s6/command/s6-svscan -d4 -- /run/service               # PID 1 = supervision tree
+$ docker compose exec -T robotina sh -c 'grep -E "^(Uid|Gid)" /proc/1/status'   # Uid 0 / Gid 0
+$ MSYS_NO_PATHCONV=1 docker compose exec -T robotina /command/s6-rc -a list | wc -l   # 10
+logs: "robotina: opencode listo (intentos=1)"; "[Telegram] Connected to Telegram (polling mode)"
+```
+
+### Task 43 — frozen egress boundary and mandatory-input guard
+
+```text
+$ git merge-base HEAD main                                             # ceef8127fb3c9d5a0f40c27b72ddc1209fa96adc
+$ git diff --exit-code $(git merge-base HEAD main)...HEAD -- squid/    # exit 0 (byte-identical)
+$ git status --porcelain -- squid/                                     # no output
+$ env -u HOST_DATA_DIR docker compose --env-file /dev/null config -q   # exit 1
+#   error while interpolating services.robotina.volumes.[].source: required variable
+#   HOST_DATA_DIR is missing a value: definir HOST_DATA_DIR en .env, por ej. C:/robotina-data
+$ docker compose exec -T robotina sh -c 'printenv NO_PROXY; printenv no_proxy'
+localhost,127.0.0.1,::1,robotina,egress-proxy                          # both variables, contains
+localhost,127.0.0.1,::1,robotina,egress-proxy                          # robotina, 127.0.0.1, egress-proxy
+$ docker compose logs egress-proxy 2>&1 | grep -n "127.0.0.1:4096"     # no output (exit 1)
+```
+
+### Task 44 — rollback path intact
+
+```text
+$ docker volume ls --format '{{.Name}}' | grep -cE '^robotina_(engram|opencode)_db$'
+2                                                                      # both state volumes unchanged
+$ git ls-files scripts/fix-permissions.ps1                             # no output (deleted per Q7)
+```
+
+The three legacy host folders (`opencode/`, `git/`, `go/` under `${HOST_DATA_DIR}`) **cannot be
+observed on this host — they never existed here** (design §7.2: the folders were never created on
+the authoring host, which is why the copy-forward migration is a no-op). `HOST_DATA_DIR` contains
+only `backups/`, `hermes/` and `workspace/`; `opencode`, `git` and `go` are all **ABSENT**:
+
+```text
+$ HOST_DATA_DIR=$(grep -m1 '^HOST_DATA_DIR=' .env | cut -d= -f2- | tr -d "\r"); ls "$HOST_DATA_DIR"
+backups  hermes  workspace
+$ for d in opencode git go; do [ -e "$HOST_DATA_DIR/$d" ] && echo "$d: EXISTS" || echo "$d: ABSENT"; done
+opencode: ABSENT
+git: ABSENT
+go: ABSENT
+```
+
+The task's literal `ls -ld …/opencode …/git …/go` (all three exist) therefore cannot pass here and
+is recorded as **not observable**, not fabricated. The rollback story stays intact regardless: both
+state volume names are unchanged, git history retains `scripts/fix-permissions.ps1`, and the new
+`robotina/` tree plus the removal of `opencode/` are a single revertible unit. **No destructive
+action was taken in this slice** (the `up -d` only recreated the container from the rebuilt image).
+
+### Task 45 — final secret-leak audit (value-shaped, per finding F1)
+
+```text
+# value-shaped: an assignment whose value looks like a real secret (16+ chars, no placeholder/comment/$-ref)
+$ git grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN|OPENCODE_SERVER_PASSWORD|HERMES_OPENCODE_GO_API_KEY)=[A-Za-z0-9_./+=-]{16,}' -- ':!*.example'
+# no output (exit 1)
+$ docker compose logs robotina 2>&1 | grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN|OPENCODE_SERVER_PASSWORD)='
+# no output (exit 1)
+$ git check-ignore -v .env                                             # .gitignore:6:.env	.env
+$ git ls-files .env                                                    # no output
+# CR4 authoring rule: every static-validation mention carries -q/--services/--format on the same line
+$ git grep -nE "docker compose confi[g]" -- README.md README.en.md SECURITY.md scripts/ openspec/changes/single-robotina-container/design.md openspec/changes/single-robotina-container/tasks.md | grep -vE "config [-]{1,2}(q|services|format)"
+# no output (exit 1) — 5 hits, all flagged
+```
+
+The literal form `(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=.+` matches **34 benign
+lines** in the untouched tree (empty documentation placeholders, `$VAR`/`${VAR}` shell references,
+and `grep "^KEY=" .env` patterns) and is unsatisfiable; the value-shaped form above replaces it in
+task 45's text, with the reason recorded there. It still fails if a real secret value lands in a
+tracked file.
+
+### Final stack state (after tasks 42–45)
+
+```text
+$ docker compose ps
+egress-proxy   Up … (healthy)
+robotina       Up … (healthy)
+$ docker compose exec -T robotina sh -c 'for p in $(pgrep -f "[o]pencode serve"); do …'
+pid=211 uid=10000  CapInh/Prm/Eff/Amb=0x0  CapBnd=0xeb  NoNewPrivs=1
+logs: "[Telegram] Connected to Telegram (polling mode)"
+```
+
+### Findings for the parent
+
+- **A2 (resolved).** `openspec/project.md` said "five capabilities" in the services table (line 29)
+  and the coupling map (line 82). Both now read **six capabilities, bounding mask `0xeb`**. No
+  unlabelled five-capability wording remains in a non-history artifact; the surviving `0xcb`/five-bit
+  mentions are all inside labelled AMENDMENT/history notes.
+- **F1 (resolved).** Task 45's literal secret grep is replaced by the value-shaped form and the
+  reason is recorded in `tasks.md`.
+- **N1 (observation, out of scope).** `odd/tasks/compose-egress-hardening.md:100` still says
+  "Hermes needs five capabilities" — that is a **different, historical** ODD feature record for the
+  retired two-container layout, not an artifact of this change; left untouched.
+- **N2 (observation).** `openspec/changes/single-robotina-container/specs/agent-container/spec.md`
+  line ~116 names the original five-capability `0xcb` set, but only inside a labelled
+  `AMENDMENT (apply, task 28)` note — honest history, not a contradiction; left untouched.
+
 ## Next step
 
-Runtime verification for tasks 21, 22, 27 and 28 is complete (task 28 closed in slice 10), and
-slice 11 closed the measurement trail: **26** (peak `pids.current` = `478` under the concurrent worst
-case), **38** (`pids_limit: 1024` confirmed by the pre-committed rule; `compose.yml` untouched),
-**40** (`SECURITY.md` measured evidence, including the six-bit `0xeb` decode, the resource budget,
-the nesting result and the gate-failure behaviour) and **41** (this record's consolidated evidence).
-The stale lifecycle claim is corrected in both READMEs and annotated — not rewritten — in
-`explore.md`.
+**All 45 implementation tasks are complete.** The final tree passed the end-to-end suite
+(`docker compose config -q && build && up -d && ps` → exactly `robotina` + `egress-proxy`, both
+healthy), the credential-aware loopback probe (HTTP **200**; plain probe **401**), the frozen-egress
+and mandatory-input checks (squid byte-identical vs the merge base, `NO_PROXY`/`no_proxy` carry
+`robotina`/`127.0.0.1`/`egress-proxy`, missing `HOST_DATA_DIR` refuses to start, no loopback endpoint
+traffic in the proxy log), the rollback-path checks (both volume names, `fix-permissions.ps1` deleted,
+no destructive action) and the final value-shaped secret audit (no output).
 
-Remaining: **42–45** — the end-to-end verification suite on the final tree, the frozen-egress and
-mandatory-input guard checks, the rollback-path check, and the final secret-leak audit. They were
-reported as out of scope in slice 11 and were **not** started. When they close, run `sdd-archive`
-(T9), with `sdd-verify` optional. Delivery (T10: branch pushed, PR opened) stays a separate user
-decision.
+The three legacy host folders could not be observed here (they never existed on this host) and are
+recorded as **not observable**. One workload part (a Telegram message burst) remains unreproduced in
+the task-26 peak. Both are for `verify`/`archive` to carry, not blockers.
 
-Numeric prerequisite solved: the earlier "pending" markers for `pids`/nesting/capabilities in this
-file and in `SECURITY.md` are now resolved by measurement, not by estimate.
+Recommended next phase: **`sdd-archive`** (with `sdd-verify` explicitly optional). Delivery (T10:
+branch pushed, PR opened) stays a separate user decision; no commit/push/PR was performed by apply.

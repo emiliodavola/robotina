@@ -1,7 +1,7 @@
 # Apply progress — single-robotina-container
 
 Cumulative per-slice progress. The original body below is **slice 02**; the sections for
-**slices 03, 04, 05, 06, 07, 08, 09, 10 and 11** are appended at the end of this file, in order.
+**slices 03, 04, 05, 06, 07, 08, 09, 10, 11 and 12** are appended at the end of this file, in order.
 Nothing in the earlier bodies was overwritten or deleted; slice 05 reopens and re-closes two
 slice-04 tasks (10 and 12) with the reason recorded.
 
@@ -2330,3 +2330,169 @@ Every static-validation invocation in this section carries `-q`, `--services` or
 same line; the bare `docker compose config` form was never run and is never written here. No token,
 key or password value was ever printed (the API probes used `-u "opencode:$OPENCODE_SERVER_PASSWORD"`
 expanded inside the container and never echoed).
+
+---
+
+# Slice 12 — `feat/single-robotina-container-12-final` (final verification + rollback safety, tasks 42–45)
+
+Appended to the cumulative body above; nothing above was modified except the header line, which now
+lists slices 03–12. Branch: `feat/single-robotina-container-12-final`, cut from slice 11's tip
+`2f0da36` under `feature-branch-chain`, tracker `feat/single-robotina-container`. This slice is
+**verification only** — no production code changed; the only edits are the change record, the task
+checkboxes and the two mandated alignments (A2 in `openspec/project.md`, F1 in `tasks.md`).
+
+## Structured status consumed
+
+- Native `gentle-ai.sdd-status` v2 at the start of this run: `changeName: single-robotina-container`,
+  `artifactStore: openspec`, `nextRecommended: apply`, `applyState: ready`, `dependencies.apply:
+  ready`, `taskProgress: 41/45 complete, 4 pending`, `blockedReasons: []`, `notes: []`.
+- `actionContext`: `mode: repo-local`, `workspaceRoot: C:\Users\elaze\Desktop\robotina`,
+  `allowedEditRoots: ["C:\Users\elaze\Desktop\robotina"]`. **No actionContext warnings** raised by
+  the status engine. Two apply-observed observations (N1, N2) are recorded under Findings.
+- Delivery path present in the parent prompt: chained PRs, `feature-branch-chain`, this slice only
+  (tasks 42–45 plus the A2/F1 alignments); `exception-ok` accepted per slice by the user (~650
+  authored lines).
+- `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`, `test_command: null`; the
+  parent prompt did not activate strict TDD.
+- No child subagent was launched. No `git commit`/`git push`/PR was performed — the parent owns the
+  index and delivery. No token, key or password value was ever printed. The stack was left
+  **healthy and running**.
+
+## Completed tasks (4/4 in this slice; 45/45 overall) and their persisted checkbox updates
+
+`openspec/changes/single-robotina-container/tasks.md` was re-read after editing: tasks **42, 43, 44,
+45** are `- [x]`; `grep -c '^- \[ \]'` = **0** and `grep -c '^- \[x\]'` = **45**. Each checkbox was
+flipped after its verification command actually ran and was observed.
+
+| Task | What was done | Verification actually run | Observed result |
+| --- | --- | --- | --- |
+| 42 | End-to-end suite on the final tree + credential-aware loopback probe; record written to the ODD file | `docker compose config -q && docker compose build && docker compose up -d && docker compose ps`; the credential-aware probe; the plain probe with `-w '%{http_code}'`; `ss -ltn`; PID-1 cmdline/status; `s6-rc -a list` | `config -q` exit 0; build exit 0 (`Image robotina:local Built`); `up -d` exit 0; `ps` = exactly `robotina` + `egress-proxy`, both healthy; credential-aware **200** `{"healthy":true,"version":"1.18.32"}`; plain **401**; PID 1 = `s6-svscan`; 10 s6 services |
+| 43 | Frozen egress boundary + mandatory-input guard | `git diff --exit-code $(git merge-base HEAD main)...HEAD -- squid/`; `git status --porcelain -- squid/`; `env -u HOST_DATA_DIR docker compose --env-file /dev/null config -q`; `printenv NO_PROXY`/`no_proxy`; `docker compose logs egress-proxy \| grep 127.0.0.1:4096` | diff exit 0 (byte-identical); status empty; guard exit 1 with the interpolation error; both proxy vars carry `robotina`/`127.0.0.1`/`egress-proxy`; proxy log grep no output (exit 1) |
+| 44 | Rollback path intact | `docker volume ls … \| grep -cE '^robotina_(engram\|opencode)_db$'`; `git ls-files scripts/fix-permissions.ps1`; the legacy-folder probe | count **2**; `git ls-files` no output; `HOST_DATA_DIR` has only `backups`/`hermes`/`workspace` and `opencode`/`git`/`go` are **ABSENT** (not observable here, recorded, not fabricated) |
+| 45 | Final value-shaped secret audit (F1) | the value-shaped grep; the container-log grep; `git check-ignore -v .env`; `git ls-files .env`; the CR4 authoring-rule grep | value-shaped grep no output (exit 1); log grep no output (exit 1); `.gitignore:6:.env`; `ls-files` no output; CR4 no output (5 hits, all flagged) |
+
+## TDD Cycle Evidence
+
+**Not applicable.** `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`,
+`test_command: null`; the parent prompt did not activate strict TDD. No RED/GREEN table is produced
+because no test runner exists and none may be invented. Every proof is shell-level against the live
+container.
+
+## Files changed in this slice (authored line counts, `git diff --numstat`)
+
+| File | Change | Additions | Deletions | Total |
+| --- | --- | --- | --- | --- |
+| `odd/tasks/single-robotina-container.md` | Slice-12 section + slice-progress rows (S9/S11 corrected, S12 added) + task-progress line + progress bullet + rewritten `## Next step` | 156 | 22 | 178 |
+| `openspec/project.md` | A2: five → six capabilities, bounding mask `0xeb` (services table + coupling map) | 5 | 4 | 9 |
+| `openspec/changes/single-robotina-container/tasks.md` | tasks 42–45 `- [ ]` → `- [x]` + task-45 F1 amendment note | 13 | 5 | 18 |
+| `openspec/changes/single-robotina-container/apply-progress.md` | this cumulative section + header update | 167 | 1 | 168 |
+| **Total authored changed lines (measured `git diff --numstat`)** | | **341** | **32** | **373** |
+
+- Measured total: **373 authored lines**, under the canonical **400**-line budget (and well under
+  the ~650 per-slice `size:exception` the user accepted). No production file (`compose.yml`,
+  `robotina/`, `hermes/`, `squid/`, `scripts/`) was touched. No `compose.yml` change was needed.
+- `git status --porcelain` for the slice: ` M odd/tasks/single-robotina-container.md`,
+  ` M openspec/project.md`, ` M openspec/changes/single-robotina-container/tasks.md`,
+  ` M openspec/changes/single-robotina-container/apply-progress.md`.
+
+## Deviations from task text / design
+
+1. **D-s12-1 — task 42's `docker compose build` re-resolved the floating vendor tag and recreated
+   the container.** `up -d` reported `robotina Recreated` because the rebuild changed the image; the
+   stack returned to `(healthy)` within ~4 s. This is the expected behavior of the floating
+   `latest` tag (finding A3 from slice 11), not a defect.
+2. **D-s12-2 — task 44's legacy-folder `ls -ld …` cannot pass on this host.** The three legacy
+   folders never existed here (design §7.2), so the check is recorded as **not observable** with the
+   reason and the observed `HOST_DATA_DIR` contents, instead of fabricating folders or weakening the
+   check.
+3. **D-s12-3 — task 45's literal grep is replaced by the value-shaped form.** See F1; the literal
+   form matches 34 benign lines and is unsatisfiable, so the audit uses
+   `…=[A-Za-z0-9_./+=-]{16,}` (no placeholder, no comment, no `$`-reference) and the reason is
+   recorded in the task text. The audit still fails on a real secret value.
+4. **D-s12-4 — the auth property is asserted on the HTTP status code.** `curl` without `-f` exits 0
+   on a 401 (slice-11 finding A1); the plain probe therefore prints `%{http_code}` = `401` and the
+   credential-aware probe prints `200`.
+5. **D-s12-5 — the s6 query needed `MSYS_NO_PATHCONV=1` and the absolute `/command/s6-rc` path.**
+   Git Bash rewrote `/command/s6-rc` to `C:/Program Files/Git/command/s6-rc` and the bare `s6-rc`
+   was not on the non-login exec PATH; both were corrected in the recorded recipe.
+
+## Findings for the parent (not fixed here — outside this slice)
+
+- **A2 (resolved).** `openspec/project.md` five → six capabilities, `0xeb` (lines 29 and 82).
+- **F1 (resolved).** Task 45's literal secret grep replaced by the value-shaped form; reason recorded.
+- **N1 (observation, out of scope).** `odd/tasks/compose-egress-hardening.md:100` still says "Hermes
+  needs five capabilities" — a different, historical ODD feature record for the retired
+  two-container layout, not an artifact of this change; left untouched.
+- **N2 (observation).** `specs/agent-container/spec.md` ~line 116 names the original five-capability
+  `0xcb` set only inside a labelled `AMENDMENT (apply, task 28)` note — honest history, not a
+  contradiction; left untouched.
+
+## Remaining tasks (0) — exact unchecked lines from the persisted artifact
+
+```text
+(none)
+```
+
+## Workload / PR boundary
+
+- **Slice budget vs actual:** the composed slice authored **180** lines (record + two alignments),
+  under the ~650 per-slice exception the user accepted. **No new `size:exception` is requested.**
+- **PR boundary:** branch `feat/single-robotina-container-12-final`, targeting slice 11's branch
+  under `feature-branch-chain`. Contents: `odd/tasks/single-robotina-container.md`,
+  `openspec/project.md`, `openspec/changes/single-robotina-container/tasks.md` and this
+  `apply-progress.md`. No production file is in it.
+- No `git commit`, `git push` or PR was created — the parent owns delivery and the index.
+
+## Verification commands run in this slice (exhaustive, with observed output)
+
+```text
+# --- task 42 ---
+docker compose config -q                                                                    # exit 0
+docker compose build                                                                        # exit 0, Image robotina:local Built
+docker compose up -d                                                                        # exit 0; robotina Recreated + Started
+docker compose ps                                                                           # exactly robotina + egress-proxy, both healthy
+docker compose exec -T robotina sh -c '...curl -fsS "$@" .../global/health'                  # exit 0 {"healthy":true,"version":"1.18.32"}
+docker compose exec -T robotina sh -c '...curl -s -o /dev/null -w "%{http_code}\n" "$@" ...'   # 200 (credential-aware)
+docker compose exec -T robotina sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -m 5 ...'      # 401 (plain)
+docker compose exec -T robotina sh -c 'ss -ltn | grep 4096'                                 # LISTEN 127.0.0.1:4096 only
+docker compose exec -T robotina sh -c 'tr "\0" " " < /proc/1/cmdline'                      # s6-svscan … /run/service
+docker compose exec -T robotina sh -c 'grep -E "^(Uid|Gid)" /proc/1/status'                 # Uid 0 / Gid 0
+MSYS_NO_PATHCONV=1 docker compose exec -T robotina /command/s6-rc -a list | wc -l           # 10
+
+# --- task 43 ---
+git merge-base HEAD main                                                                    # ceef8127…
+git diff --exit-code $(git merge-base HEAD main)...HEAD -- squid/                           # exit 0
+git status --porcelain -- squid/                                                            # no output
+env -u HOST_DATA_DIR docker compose --env-file /dev/null config -q                          # exit 1 (required variable HOST_DATA_DIR)
+docker compose exec -T robotina sh -c 'printenv NO_PROXY; printenv no_proxy'                # both carry robotina,127.0.0.1,egress-proxy
+docker compose logs egress-proxy 2>&1 | grep -n "127.0.0.1:4096"                           # no output (exit 1)
+
+# --- task 44 ---
+docker volume ls --format '{{.Name}}' | grep -cE '^robotina_(engram|opencode)_db$'          # 2
+git ls-files scripts/fix-permissions.ps1                                                    # no output
+ls "$HOST_DATA_DIR"                                                                          # backups hermes workspace; opencode/git/go ABSENT (not observable)
+
+# --- task 45 ---
+git grep -nE '(...)=[A-Za-z0-9_./+=-]{16,}' -- ':!*.example'                                # no output (exit 1)
+docker compose logs robotina 2>&1 | grep -nE '(TELEGRAM_BOT_TOKEN|...|OPENCODE_SERVER_PASSWORD)='   # no output (exit 1)
+git check-ignore -v .env                                                                    # .gitignore:6:.env	.env
+git ls-files .env                                                                           # no output
+git grep -nE "docker compose confi[g]" -- <paths> | grep -vE "config [-]{1,2}(q|services|format)"   # no output (exit 1)
+
+# --- final stack state + capability sanity ---
+docker compose ps                                                                           # both healthy
+docker compose exec -T robotina sh -c 'for p in $(pgrep -f "[o]pencode serve"); do ...'      # pid=211 uid=10000 CapBnd=0xeb CapEff=0x0 NoNewPrivs=1
+docker compose logs --since 5m robotina | grep -i telegram                                   # [Telegram] Connected to Telegram (polling mode)
+docker inspect --format '{{json .Config.Healthcheck.Test}}' robotina                          # ["CMD","/opt/robotina/healthcheck.sh"]
+
+# --- task-41 record checks re-run after the ODD edit ---
+grep -c 'robotina' odd/tasks/single-robotina-container.md                                     # 134
+grep -niE 'CapEff|pids|nesting|digest' odd/tasks/single-robotina-container.md                 # non-empty
+grep -n '_(pending)_' odd/tasks/single-robotina-container.md                                  # no output (exit 1)
+grep -c '^- \[x\]' openspec/changes/single-robotina-container/tasks.md                        # 45
+grep -c '^- \[ \]' openspec/changes/single-robotina-container/tasks.md                        # 0
+```
+
+Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
+same line; the bare `docker compose config` form was never run and is never written here. No token,
+key or password value was ever printed.
