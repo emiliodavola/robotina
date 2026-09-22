@@ -853,6 +853,17 @@ One documented manual step in both READMEs: rename the bot's Telegram **display 
 change (ID4's grep looks for `username` within six lines after every `botfather` mention — so the
 word must not appear there in either language).
 
+> **AMENDMENT A3 — apply-observed (slice 06, runtime).** The vendor seeds a third identity layer
+> the design did not name: `/opt/data/SOUL.md` (from `hermes_cli/default_soul.py::DEFAULT_SOUL_MD`,
+> seeded by `hermes_cli/config.py` on first run and auto-injected as context by `_parser.py`). The
+> seeded text still opens `You are Hermes Agent, built by Nous Research.` The skin's
+> `branding.agent_name` governs the *displayed* name (`hermes skin list` marks `robotina`, the skin
+> engine resolves `branding.agent_name = robotina`) and `.hermes.md` carries the explicit identity
+> statement, but SOUL.md is host state (`$HOST_DATA_DIR/hermes/SOUL.md`, outside the repository and
+> this change's edit surfaces) and its persona sentence is untouched. The observable ID3 asks for
+> (the agent states it is `robotina`) still holds via `.hermes.md`; the residual vendor persona text
+> is reported as a finding for `verify`/`archive`, not silently changed.
+
 ---
 
 ## 12. Migration mechanism (Q12)

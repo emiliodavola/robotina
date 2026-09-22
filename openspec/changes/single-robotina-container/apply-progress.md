@@ -1,7 +1,7 @@
 # Apply progress — single-robotina-container
 
 Cumulative per-slice progress. The original body below is **slice 02**; the sections for
-**slices 03, 04 and 05** are appended at the end of this file, in order. Nothing in the earlier
+**slices 03, 04, 05 and 06** are appended at the end of this file, in order. Nothing in the earlier
 bodies was overwritten or deleted; slice 05 reopens and re-closes two slice-04 tasks (10 and 12)
 with the reason recorded.
 
@@ -936,3 +936,209 @@ git grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=[A-Za-z0-9_-
 Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
 same line. The bare form was never run and is never written here. No token or key value was ever
 printed; key comparisons use `sha256sum` only.
+
+---
+
+# Slice 06 — `feat/single-robotina-container-05-identity` (identity layer, tasks 13–16)
+
+Appended to the cumulative body above. Nothing above was modified except the header line, which now
+marks this file as cumulative through slice 06.
+
+## Structured status consumed
+
+- Native `gentle-ai.sdd-status` v2 provided by the parent: `changeName: single-robotina-container`,
+  `artifactStore: openspec`, `nextRecommended: apply`, `applyState: ready`, `dependencies.apply: ready`,
+  `taskProgress: 19/45`, `blockedReasons: []`, `notes: []`.
+- `actionContext`: `mode: repo-local`, `workspaceRoot: C:\Users\elaze\Desktop\robotina`,
+  `allowedEditRoots: ["C:\Users\elaze\Desktop\robotina"]`. **No actionContext warnings** raised by
+  the status engine. Two apply-observed findings are recorded under Findings (F1, F2).
+- Review-workload gate: the parent prompt carries the resolved delivery path — chained PRs,
+  `feature-branch-chain`, tracker `feat/single-robotina-container`, current slice branch
+  `feat/single-robotina-container-05-identity`, `exception-ok` accepted per slice (~650 authored
+  lines). `tasks.md`'s forecast (`Decision needed before apply: Yes`, `Chained PRs recommended:
+  Yes`, `400-line budget risk: High`) is satisfied by that resolved path. This slice implements
+  tasks 13–16 only.
+- `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`, `test_command: null`; the
+  parent prompt did not activate strict TDD.
+- No child subagent was launched. No `git commit`/`git push`/PR was performed — the parent owns the
+  index and delivery. No token or key value was ever printed.
+
+## Completed tasks (23/45) and their persisted checkbox updates
+
+`openspec/changes/single-robotina-container/tasks.md` was re-read after editing: **23 checked**
+(`grep -c '^- \[x\]'`), **22 pending** (`grep -c '^- \[ \]'`). Tasks 13, 14, 15 and 16 were flipped
+to `- [x]` only after their verification commands were actually run and observed.
+
+| Task | What was done | Verification actually run | Observed result |
+| --- | --- | --- | --- |
+| 13 | `hermes/skins/robotina.yaml` authored from the vendor-bundled sample schema (`name` / `description` / `branding` / `tool_prefix`; missing keys inherit `default`) | `git ls-files hermes/skins/robotina.yaml`; `git ls-files --others --exclude-standard`; `git check-ignore -v`; `grep -nE "^(name: robotina| +agent_name: robotina)$"` | `git ls-files` **empty** (untracked; index owned by the parent — see D1); `--others` prints `hermes/skins/robotina.yaml`; check-ignore exit **1** (not ignored); grep → exactly **2 matches** (line 16 `name: robotina`, line 21 `  agent_name: robotina`) |
+| 14 | `robotina/s6/cont-init.d/20-robotina-identity` authored: guarded, idempotent, missing-config → loud warning + exit 0, otherwise `display.skin=robotina` as uid 10000 with `HOME=/opt/data`; ordered after the vendor hooks; Spanish comments; documented Python/YAML fallback | `docker compose build robotina`; in-image `sh -n`; the live recreate; idempotency re-run; missing-config branch in a throwaway container | build **exit 0**, `cont-init.d propio instalado`, installed `/etc/cont-init.d/20-robotina-identity` 0755, image `sh -n` OK; startup ran it **after** `01-hermes-setup`/`015-supervise-perms`/`02-reconcile-profiles`/`10-robotina-state` and printed `✓ Set display.skin = robotina …` + `robotina: skin de identidad 'robotina' seleccionada (display.skin)`, exit 0; re-run → rc 0, no write; missing config → warning line + rc 0 |
+| 15 | `hermes/context/.hermes.md` rewritten for the merged topology (identity `robotina`, one container, local endpoint, `gh` + `GITHUB_TOKEN` present, `404`→token permissions); English | the three task greps; in-container `grep -c robotina /workspace/.hermes.md` | grep 1 non-empty (lines 1,6,7 …); grep 2 (banned two-container phrases) **no output**, rc 1; grep 3 → line 14 `http://127.0.0.1:4096`; container file shows **3** `robotina` matches |
+| 16 | `hermes/skills/opencode-server/SKILL.md` rewritten for the local server (loopback, CLI present, `OPENCODE_SERVER_PASSWORD` recipe kept) and `hermes/skills/github-private-repos/SKILL.md` for the retired credential split; English | both task greps; in-container skill greps | grep B (isolation claims) **no output**, rc 1; grep A has **one residual match** `SECURITY.md:302` (see F1, outside this slice's edit surfaces); in-container `opencode-server` has **6** `127.0.0.1:4096`, `github-private-repos` has **3** `GITHUB_TOKEN` |
+
+## Runtime identity evidence (the observable, not the file)
+
+Recreate with the new image: `docker compose up -d --force-recreate robotina` → exit 0, container
+`healthy`.
+
+| Probe | Command | Observed result |
+| --- | --- | --- |
+| Active skin resolves to `robotina` (vendor CLI) | `s6-setuidgid hermes env HOME=/opt/data hermes skin list` | `* robotina  user  Identity skin for the robotina stack …` (star on `robotina`) |
+| `display.skin` reads back as the `hermes` user | `s6-setuidgid hermes env HOME=/opt/data hermes config get display.skin` | `robotina` |
+| Persisted key | `grep -niE "skin" /opt/data/config.yaml` | `1965:  skin: robotina` |
+| Engine resolves the displayed name | `init_skin_from_config(load_config())` + `get_active_skin()` in the vendor venv | `active_skin = robotina`, `branding.agent_name = robotina`, `tool_prefix = '┊'` |
+| Skin reaches the container **read-only** | `ls -l /opt/data/skins/robotina.yaml`; `touch`; `grep " /opt/data/skins" /proc/self/mountinfo` | present; `touch` → `Read-only file system`, rc 1; mount source `/Users/elaze/Desktop/robotina/hermes/skins` options `ro,noatime` |
+| Context reaches the always-loaded path | `grep -c robotina /workspace/.hermes.md`; `grep -n http://127.0.0.1:4096` | `3`; line 14 |
+| Stack still healthy | `docker compose ps`; `PATH=/command:$PATH s6-rc -a list`; `docker compose logs robotina \| grep -i telegram` | `robotina` + `egress-proxy` both `(healthy)`; 10 services incl. our four; `[Telegram] Connected to Telegram (polling mode)` |
+
+## TDD Cycle Evidence
+
+**Not applicable.** `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`,
+`test_command: null`; the parent prompt did not activate strict TDD. Verification is the shell-level
+suite above (source greps, vendor-CLI output, `/proc/self/mountinfo`).
+
+## Files changed in this slice (authored line counts)
+
+| File | Change | Additions | Deletions |
+| --- | --- | --- | --- |
+| `hermes/skins/robotina.yaml` | new (identity skin, read-only mount) | 21 | 0 |
+| `robotina/s6/cont-init.d/20-robotina-identity` | new (guarded, idempotent `display.skin` selection) | 63 | 0 |
+| `hermes/context/.hermes.md` | rewritten for the merged topology | 32 | 24 |
+| `hermes/skills/opencode-server/SKILL.md` | rewritten for the local server | 22 | 26 |
+| `hermes/skills/github-private-repos/SKILL.md` | rewritten for the retired credential split | 43 | 37 |
+| `openspec/changes/single-robotina-container/tasks.md` | tasks 13–16 `- [ ]` → `- [x]` | 4 | 4 |
+| `openspec/changes/single-robotina-container/design.md` | **AMENDMENT A3** in §11: the vendor `SOUL.md` persona layer | 6 | 0 |
+| `openspec/changes/single-robotina-container/apply-progress.md` | this cumulative section + header | new section | 0 |
+
+- **Implementation-only authored changed lines: 21 + 63 + 56 + 48 + 80 = 268** — inside the 400-line
+  review budget and well inside the accepted per-slice `size:exception` (~650).
+- Process-record lines (`tasks.md` 8 + `design.md` 6 + this section): the section is
+  self-referential and moves a few lines per edit.
+- `git status --porcelain` for the slice: ` M hermes/context/.hermes.md`,
+  ` M hermes/skills/github-private-repos/SKILL.md`, ` M hermes/skills/opencode-server/SKILL.md`,
+  `?? hermes/skins/`, `?? robotina/s6/cont-init.d/20-robotina-identity`, plus the two changed change
+  artifacts.
+- Nothing was compressed or deleted to fit the budget (comments, docs and evidence preserved).
+
+## Deviations from design
+
+1. **D1 — task 13's `git ls-files` literal check cannot return non-empty without staging.** The
+   parent owns the index and prior slices did not stage (slice 03's D5), so the new skin file is
+   untracked: `git ls-files` prints nothing. The observable the task intends is proven by
+   `git ls-files --others --exclude-standard hermes/skins/robotina.yaml` (prints the file) plus
+   `git check-ignore -v` (exit 1 → not ignored). Same deviation class as D5; no design statement
+   changes.
+2. **D2 — the skin file's comments are English, the cont-init's are Spanish.** The parent's language
+   contract makes `hermes/` context/skills English; the skin lives in the same agent-facing tree, so
+   it follows that convention. The cont-init is shell in `robotina/`, so its comments stay Spanish
+   per the repository rule. No design statement changes.
+3. **D3 — design §11.1's "derive the schema from a vendor-bundled sample skin" resolved to a real
+   file**, `/opt/hermes/skills/autonomous-ai-agents/hermes-agent/templates/skin.yaml`, and the vendor
+   key for the displayed name **is** `branding.agent_name`, so §11.1's fallback ("if the vendor key
+   differs, use the vendor key") was not needed. No correction required.
+4. **D4 — design §11.2's `hermes config set display.skin robotina` needed no `--force`.** Verified
+   live: the vendor CLI accepted the key and wrote `skin: robotina`. The documented Python/YAML
+   fallback remains unused, as designed.
+
+## Findings for the parent (not fixed here — outside tasks 13–16)
+
+- **F1 — task 16's verify-A cannot be fully clean within this slice's edit surfaces.** The grep
+  `grep -rniE "sin credencial|…" hermes/ SECURITY.md` still matches `SECURITY.md:302`:
+  ``Verificado: con el password puesto, `sin credencial -> 401`, `con credencial -> 200`,``.
+  `SECURITY.md` is a documentation-slice file (tasks 39–40, outside this run's allowed edit surfaces:
+  `hermes/`, `robotina/`, the change artifacts, the ODD file). The `hermes/` half of the grep is now
+  clean; the parent should close the `SECURITY.md` half in the docs slice.
+- **F2 — the vendor SOUL.md persona layer (design AMENDMENT A3).** `/opt/data/SOUL.md` is
+  vendor-seeded (`$HOST_DATA_DIR/hermes/SOUL.md`, outside the repo) and still opens
+  `You are Hermes Agent, built by Nous Research.` The displayed name is `robotina` (skin +
+  `display.skin`) and `.hermes.md` carries the explicit identity statement, so ID3's observable
+  holds; the residual vendor persona sentence is host state this change does not edit. Reported for
+  `verify`/`archive`; a follow-up could customize SOUL.md or add an identity key if the persona
+  sentence must also change.
+- **F3 — the identity artifacts split across two delivery mechanisms.** `hermes/skins/robotina.yaml`
+  and `hermes/context/.hermes.md` are bind mounts (live on edit; only a recreate is needed), while
+  `robotina/s6/cont-init.d/20-robotina-identity` is image-shipped (needs a rebuild). This slice did
+  both (build + `--force-recreate`) and proved each at runtime.
+
+## Remaining tasks (22) — exact unchecked lines from the persisted artifact
+
+```text
+- [ ] 21. Verify the readiness gate holds across repeated recreations and that no
+- [ ] 22. Verify the identity layers and the state-ownership behaviour at runtime (ID1, ID2,
+- [ ] 26. **[measurement-dependent]** Sample the merged cgroup's `pids.current` baseline and
+- [ ] 27. Verify the `opencode-init` semantics at runtime: overlay idempotency (double-run byte
+- [ ] 28. Verify s6 recovery and the single-lifecycle property (AC5, AC8 amended proof).
+- [ ] 29. Author `scripts/migrate-state.ps1`: per-path copy-forward **only when the
+- [ ] 30. Update `scripts/export-state.sh`: header comment and the invocation prefix for the
+- [ ] 31. `scripts/fix-permissions.ps1` — **undecided item, interim safe default only.**
+- [ ] 32. Update `.env.example`: document both key names with no values, note the routing of
+- [ ] 33. Rewrite `README.md` (Spanish) and `README.en.md` (English) **in the same commit**
+- [ ] 34. Update `openspec/project.md`: services table, coupling map, repository layout,
+- [ ] 35. Add the **superseded-by** note to `odd/tasks/agent-interop-http.md` (R6) without
+- [ ] 36. Align the stale `OPEN ITEM` annotations in this change's own specs with the design
+- [ ] 37. Conditional wording alignment: check `openspec/config.yaml`'s prose line that names
+- [ ] 38. **[measurement-dependent]** Apply design §16's pre-committed adjustment rule to the
+- [ ] 39. Rewrite `SECURITY.md`'s non-measured retained entries (Spanish): R1 (credential
+- [ ] 40. **[measurement-dependent]** Add `SECURITY.md`'s measured evidence entries: R3's
+- [ ] 41. Finalize the change record: replace the ODD file's `## Verification evidence`
+- [ ] 42. Run the verification suite end to end on the final tree and record the result.
+- [ ] 43. Confirm the frozen egress boundary and the mandatory-input guard survived the merge.
+- [ ] 44. Confirm the rollback path is intact: both state volume names unchanged, the three
+- [ ] 45. Final secret-leak audit over the whole change, including this file.
+```
+
+Task 22 (the runtime identity + state-ownership verification batch) now has its identity half
+implementable but stays open because it also covers the SL6 ownership scenarios and was not assigned
+to this slice; it is **not** started here.
+
+## Workload / PR boundary
+
+- **Slice budget vs actual:** slice forecast S5 (identity) was ~275 authored lines; this slice
+  authored **268 implementation lines** plus the process record (checkboxes + design amendment + this
+  section) — inside the 400-line budget and the accepted per-slice `size:exception`.
+- **PR boundary:** this slice contains exactly `hermes/skins/robotina.yaml` (new),
+  `hermes/context/.hermes.md`, `hermes/skills/opencode-server/SKILL.md`,
+  `hermes/skills/github-private-repos/SKILL.md`,
+  `robotina/s6/cont-init.d/20-robotina-identity` (new),
+  `openspec/changes/single-robotina-container/tasks.md` (tasks 13–16),
+  `openspec/changes/single-robotina-container/design.md` (§11 AMENDMENT A3) and this
+  `apply-progress.md`. Targeted at the tracker branch `feat/single-robotina-container` under
+  `feature-branch-chain`. Tasks 17+ and the docs slices are **not** started.
+- No `git commit`, `git push` or PR was created — the parent owns delivery and the index.
+
+## Verification commands run in this slice (exhaustive)
+
+```text
+git rev-parse --abbrev-ref HEAD                                  # feat/single-robotina-container-05-identity
+git status --porcelain                                           # clean before edits
+git ls-files hermes/skins/robotina.yaml                          # empty (untracked; see D1)
+git ls-files --others --exclude-standard hermes/skins/robotina.yaml   # hermes/skins/robotina.yaml
+git check-ignore -v hermes/skins/robotina.yaml                   # no output, exit 1
+grep -nE "^(name: robotina| +agent_name: robotina)$" hermes/skins/robotina.yaml   # 2 matches
+sh -n robotina/s6/cont-init.d/20-robotina-identity               # OK (host)
+docker compose build robotina                                    # exit 0 (log /tmp/robotina-build-05-id.log)
+docker run --rm --entrypoint sh robotina:local -c 'ls -l /etc/cont-init.d/20-robotina-identity && sh -n …'   # 0755; sh -n OK
+docker compose up -d --force-recreate robotina                   # exit 0 (log /tmp/robotina-up-05-id.log)
+docker compose logs robotina | grep -iE "20-robotina-identity|display.skin"   # ran after vendor hooks; Set display.skin = robotina; exit 0
+docker compose exec robotina sh /etc/cont-init.d/20-robotina-identity         # rc 0, no write (guard)
+docker run --rm --entrypoint sh robotina:local -c '<missing-config variant>'  # loud warning, rc 0
+s6-setuidgid hermes env HOME=/opt/data hermes skin list          # * robotina user …
+s6-setuidgid hermes env HOME=/opt/data hermes config get display.skin         # robotina
+grep -niE "skin" /opt/data/config.yaml                           # 1965: skin: robotina
+s6-setuidgid hermes env HOME=/opt/data PYTHONPATH=/opt/hermes /opt/hermes/.venv/bin/python -c '<engine probe>'   # active_skin=robotina agent_name=robotina
+ls -l /opt/data/skins/robotina.yaml; touch /opt/data/skins/robotina.yaml      # present; Read-only file system (rc 1)
+grep " /opt/data/skins" /proc/self/mountinfo                     # source = repo hermes/skins, options ro
+grep -c robotina /workspace/.hermes.md; grep -n http://127.0.0.1:4096 /workspace/.hermes.md   # 3; line 14
+grep -niE "robotina" hermes/context/.hermes.md                   # non-empty
+grep -rniE "sibling container|contenedor hermano|http://opencode:4096|own container|propio contenedor" hermes/context/.hermes.md   # no output (rc 1)
+grep -n "http://127.0.0.1:4096" hermes/context/.hermes.md        # line 14
+grep -rniE "sin credencial|no github credential|no tiene token|delegate to opencode|delegar a opencode|does not run inside this container|no esta instalado|no rewrite" hermes/ SECURITY.md   # 1 match: SECURITY.md:302 (F1)
+grep -rniE "claves? (estan |están )?aislad|keys? are isolated|aisladas por proceso|isolated per process|no puede leer la clave del otro|cannot read the other" README.md README.en.md SECURITY.md hermes/   # no output (rc 1)
+docker compose ps --format 'table {{.Name}}\t{{.Status}}'        # robotina + egress-proxy (healthy)
+docker compose exec robotina sh -c 'PATH=/command:$PATH s6-rc -a list'   # 10 services incl. our four
+docker compose logs robotina | grep -i telegram                  # Connected to Telegram (polling mode)
+```
+
+Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
+same line; the bare `docker compose config` form was never run and is never written here. No token
+or key value was ever printed.

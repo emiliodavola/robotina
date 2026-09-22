@@ -326,7 +326,7 @@ inferred.
 
 ## Phase 4 — Identity
 
-- [ ] 13. Author `hermes/skins/robotina.yaml` with `name: robotina` and
+- [x] 13. Author `hermes/skins/robotina.yaml` with `name: robotina` and
   `branding.agent_name: robotina`, deriving the full schema from the vendor-bundled sample
   skin at apply (design §11.1). If the vendor's displayed-name key differs, use the vendor key
   and record the correction in the change record — the observable does not change.
@@ -335,7 +335,7 @@ inferred.
     `grep -nE "^(name: robotina| +agent_name: robotina)$" hermes/skins/robotina.yaml`
     (two matches).
 
-- [ ] 14. Author `robotina/s6/cont-init.d/20-robotina-identity`: guarded and idempotent
+- [x] 14. Author `robotina/s6/cont-init.d/20-robotina-identity`: guarded and idempotent
   (`skin: robotina` already present → no write), loud warning and exit 0 when
   `/opt/data/config.yaml` is absent (never brick startup over cosmetics), otherwise
   `s6-setuidgid hermes env HOME=/opt/data hermes config set display.skin robotina`; ordered
@@ -345,7 +345,7 @@ inferred.
   Depends on: task 10.
   - Verify: `docker compose build robotina` (exit 0); the behavioural proofs are task 22.
 
-- [ ] 15. Rewrite `hermes/context/.hermes.md` for the merged topology: explicit identity
+- [x] 15. Rewrite `hermes/context/.hermes.md` for the merged topology: explicit identity
   statement, one agent container, no sibling opencode container, endpoint
   `http://127.0.0.1:4096`, `gh` installed and `GITHUB_TOKEN` present, and a private-repo
   `404` reframed as a token-permissions problem. Avoid every banned substring listed in
@@ -354,7 +354,7 @@ inferred.
     `grep -rniE "sibling container|contenedor hermano|http://opencode:4096|own container|propio contenedor" hermes/context/.hermes.md`
     (no output); `grep -n "http://127.0.0.1:4096" hermes/context/.hermes.md` (non-empty).
 
-- [ ] 16. Rewrite `hermes/skills/opencode-server/SKILL.md` for the local server and
+- [x] 16. Rewrite `hermes/skills/opencode-server/SKILL.md` for the local server and
   `hermes/skills/github-private-repos/SKILL.md` for the retired credential split, keeping the
   `OPENCODE_SERVER_PASSWORD` recipe where it is used. Files: both skill files.
   Depends on: task 15.
