@@ -179,11 +179,14 @@ Frozen by the user after the explore phase:
 | S5 identity | `feat/single-robotina-container-05-identity` | `4b476a8` | 268 | committed |
 | S6 migration & scripts | `feat/single-robotina-container-06-scripts` | `92e1a31` | 194 | committed |
 | S7 docs | `feat/single-robotina-container-07-docs` | `fd016b3` | 726 (README pair 679) | committed; `scripts/fix-permissions.ps1` deleted (Q7) |
-| S8 records | `feat/single-robotina-container-08-records` | — | in progress | this run (`SECURITY.md`, `openspec/project.md`, ODD notes, spec alignment) |
-| S9 measurement evidence | pending | — | — | pending |
+| S8 records | `feat/single-robotina-container-08-records` | `ddbc0c2` | 968 (SECURITY.md 729) | committed (tasks 34–37, 39) |
+| S9 runtime verify | `feat/single-robotina-container-09-measurements` | — (uncommitted) | — | in progress: tasks 21, 22, 27 verified; **28 lifecycle proof FAILED** (see Slice 09) |
+| S9 measurement evidence | pending | — | — | pending (tasks 38, 40, 41; blocked on the task-26 peak and the task-28 decision) |
 
-Task progress: **19/45** implementation tasks complete (12 through slice 04; +7 in slice 05:
-tasks 17–20, 23–25, after the two slice-04 defects were fixed and the stack was re-verified live).
+Task progress: **36/45** implementation tasks complete (12 through slice 04; +7 in slice 05:
+tasks 17–20, 23–25; +4 in slice 06: 13–16; +4 in slice 07: 29–32; +1 in slice 07: 33; +5 in slice
+08: 34–37, 39; +3 in slice 09: **21, 22, 27**). Task 28's single-lifecycle proof **failed** and stays
+open — see the Slice 09 section.
 
 Verified so far without a live stack: `docker compose config -q`, `--services`,
 `docker compose build robotina` (exit 0), `docker build --check`, `s6-rc-compile` +
@@ -528,10 +531,173 @@ robotina  | [Telegram] Connected to Telegram (polling mode)
 - The in-container `robotina:4096` negative-control probe is confounded by the proxy environment
   (Squid deny page, exit 0); the unconfounded proof is the peer-container refusal.
 
+## Slice 09 — runtime verification (tasks 21, 22, 27, 28)
+
+Branch: `feat/single-robotina-container-09-measurements`. The stack was already up with live keys
+(two healthy containers, ten s6 services, Telegram connected). This slice ran the runtime proofs
+for tasks 21, 22, 27 and 28; **tasks 21, 22 and 27 are complete; task 28 is not** (its amended
+single-lifecycle proof failed — see below). The stack was left healthy and running:
+`egress-proxy` + `robotina` both `(healthy)`, Telegram `Connected to Telegram (polling mode)`,
+endpoint `{"healthy":true,"version":"1.18.32"}`, both state volumes present.
+
+Every `pgrep`/`pkill` recipe below uses a character-class pattern and asserts a non-empty match;
+an empty match was treated as a FAILURE. No secret value was printed.
+
+### Task 21 — readiness gate across repeated recreations + gate-failure behaviour
+
+Three `docker compose down && docker compose up -d` cycles, each followed by the bounded
+credential-aware loopback probe (60 × 2 s):
+
+| Cycle | `StartedAt` | gate log line | cold start |
+| --- | --- | --- | --- |
+| 1 | `2026-09-22T19:05:59.228674207Z` | `19:06:03.569450221Z opencode listo (intentos=1)` | **≈4.34 s** |
+| 2 | `2026-09-22T19:06:26.496136427Z` | `19:06:31.056849886Z opencode listo (intentos=1)` | **≈4.56 s** |
+| 3 | `2026-09-22T19:06:53.652872543Z` | `19:06:58.092762695Z opencode listo (intentos=1)` | **≈4.44 s** |
+
+- `probe_exit=0` on all three cycles; the gate was satisfied on its **first** attempt each time
+  (`intentos=1`), i.e. the endpoint answered within ≈4.3–4.6 s and always well under the 120 s bound.
+- `docker compose logs --since 10m robotina 2>&1 | grep -Ei '127\.0\.0\.1:4096.*(refused|econnrefused)'`
+  → **no output** (exit 1): no `ECONNREFUSED` for the delegate ever reached the log. The early
+  `curl: (7)` lines are the *verification probe's own* stderr, not container-log lines.
+
+**What s6-overlay does when the gate fails (observed, not inferred).** The gate was forced to fail
+in an **isolated throwaway container** (`robotina:local`, `--network none`, fresh `/opt/data`, a
+valid opencode key, with only the `opencode-ready/up` file replaced by a one-line `/bin/false`
+executable). The failure signal is the same oneshot non-zero exit the real gate would produce
+after its bound; forcing it immediately kept the observation inside the session.
+
+```text
+s6-rc: info: service opencode-ready: starting
+s6-rc: warning: unable to start service opencode-ready: command exited 1
+robotina: opencode serve -> 127.0.0.1:4096 (uid 10000)
+GATE_TEST_CMD_RAN
+opencode server listening on http://127.0.0.1:4096
+# docker inspect -> Status=running Running=true ExitCode=0
+# S6_BEHAVIOUR_IF_STAGE2_FAILS is unset (0 matches in /proc/1/environ)
+```
+
+- **Observed result: s6-overlay continues to the CMD** with a per-service `s6-rc: warning: unable
+  to start service opencode-ready: command exited 1`. It does **not** abort the container.
+- Confirmed against the real `rc.init` the container runs (`/run/s6/basedir/scripts/rc.init`):
+  `set +e; s6-rc -u -- change "$top"; r=$?; set -e; if test "$r" -gt 0 && test "$b" -gt 0; then …
+  if test "$b" -ge 2; then haltwith; fi` — with `S6_BEHAVIOUR_IF_STAGE2_FAILS` unset the default
+  `b=0`, so neither the warning branch nor the halt branch runs and the CMD is still executed.
+- This is design §9.1's D-6 scenario (a degraded start). It is recorded here for `SECURITY.md`
+  (task 40) and the README. The throwaway container was removed; the live stack was untouched.
+
+### Task 22 — identity layers + state ownership (ID1, ID2, ID3, ID5, SL6)
+
+Live container:
+
+| Probe | Command | Observed |
+| --- | --- | --- |
+| Skin present | `ls -l /opt/data/skins/robotina.yaml` | `-rwxrwxrwx 1 root root 1059 … /opt/data/skins/robotina.yaml` |
+| Skin read-only | `touch /opt/data/skins/robotina.yaml` | `touch: cannot touch '…/robotina.yaml': Read-only file system` (exit 1) |
+| Mount source + `ro` | `grep " /opt/data/skins" /proc/self/mountinfo` | source `/Users/elaze/Desktop/robotina/hermes/skins` (repo path, not under `HOST_DATA_DIR`), options `ro` |
+| `display.skin` selected | `grep -niE "skin" /opt/data/config.yaml` | `1965:  skin: robotina` (plus the vendor comment block) |
+| Context identity | `grep -c "robotina" /workspace/.hermes.md` | `3` |
+| egress identity (ID5) | `printenv NO_PROXY` | `localhost,127.0.0.1,::1,robotina,egress-proxy` (contains `robotina`; no `hermes`/`opencode`) |
+| SL6 write as uid 10000 | `s6-setuidgid hermes sh -c "touch /opt/data/.write-test && rm …"` | `writable-as-10000` |
+| SL6 ownership | `stat -c "%u:%g" /opt/data` | `10000:10000` |
+
+Fresh-state run (ID2/SL6): `docker compose -p robotina-fresh config -q` → exit 0. The **literal**
+`docker compose -p robotina-fresh up -d robotina` **cannot run on this host**: the service declares
+`container_name: robotina` (required by AC2), so the fresh project collides with the live
+container — `Conflict. The container name "/robotina" is already in use`. Recorded as a deviation
+(the spec's "isolated project name" note assumed the container name followed the project). The
+observable was proven instead with the same compose file plus a small override that renames the
+container (`robotina-fresh`), points `HOST_DATA_DIR` at a fresh temp tree and binds the two nested
+volume paths to fresh temp dirs, so the live stack and its volumes were never touched:
+
+- `docker inspect` of the fresh container shows `/opt/data` sourced from the fresh temp `hermes`
+  dir and the two nested paths from fresh temp binds (not the named volumes).
+- Startup log: `cont-init: info: running /etc/cont-init.d/20-robotina-identity` →
+  `✓ Set display.skin = robotina in /opt/data/config.yaml` → `exited 0`; `grep -niE skin
+  /opt/data/config.yaml` → `1965:  skin: robotina` (non-interactive selection on a fresh tree).
+- `s6-setuidgid hermes … touch/rm` → `writable-as-10000`; `stat -c "%u:%g" /opt/data` → `10000:10000`.
+
+The fresh container and temp dirs were removed; `docker compose ps` confirmed the live stack still
+healthy.
+
+### Task 27 — `opencode-init` semantics (AC5, SL4)
+
+- **Idempotency (double-run byte identity):** `sha256sum /opt/data/.config/opencode/opencode.json`
+  → `55e23123efb392a90b5df6f82934ecf75b1391c5818630edb9ea97d20e3c8149` before `docker compose
+  restart robotina` and the **identical** hash after (`IDEMPOTENT=yes`). The restart log shows the
+  oneshot running again (`opencode-init: starting` → `successfully started`) with no config change.
+- **Invalid-JSON quarantine:** seeded `{ this is intentionally invalid json` into the file (as uid
+  10000), restarted, and observed
+  `robotina: /opt/data/.config/opencode/opencode.json no era JSON valido; cuarentenado en
+  /opt/data/.config/opencode/opencode.json.invalid-20260922T190450Z`. The quarantine file existed
+  (`-rw-r--r-- 1 hermes hermes 36 … opencode.json.invalid-20260922T190450Z`, the user's bytes), the
+  oneshot **succeeded**, the container came up `(healthy)`, `jq -e .` on the resulting file →
+  `valid-json`, and the endpoint answered `{"healthy":true,"version":"1.18.32"}`. The test
+  artifacts (`.opencode.json.verifybak` + the quarantine file) were removed afterwards and the
+  config hash confirmed back at `55e23123…`.
+- **engram/opencode output observability:** `docker compose logs --tail 200 robotina` → **200
+  lines** (non-empty) including `robotina: engram serve (data dir /opt/data/.engram)` and
+  `robotina: opencode serve -> 127.0.0.1:4096 (uid 10000)`.
+
+### Task 28 — s6 recovery (verified) and the single-lifecycle proof (FAILED)
+
+**s6 recovery — verified.** `pgrep -f "[o]pencode serve"` (non-empty, pid 227) → `pkill -f
+"[o]pencode serve"` → the bounded credential-aware probe recovered **without manual
+intervention** (`recovery_probe_exit=0`, **5 s**), the service restarted as a new pid (`227` →
+`533`), and the `finish` log shows the documented capped backoff:
+`robotina: opencode salio (exit=256 sig=15); reinicio #1 en 1s`. The container itself did **not**
+restart (`RestartCount=0`), which is the intended s6 behaviour.
+
+**The amended single-lifecycle proof as written FAILED. Do not mark task 28 complete.**
+
+- The literal recipe `docker compose exec robotina sh -c 'pkill -f "[h]ermes gateway"'` cannot
+  even signal the process as a root exec: the container runs `cap_drop: [ALL]` with only the five
+  capability set (`CapEff=0x00000000000000cb`), so **`CAP_KILL` is dropped** and a uid-0 process
+  cannot signal a uid-10000 process — `pkill: killing pid 227 failed: Operation not permitted`. The
+  kill was therefore performed as the owning user (`docker compose exec -u hermes …`), which is the
+  faithful realization of "kill the process inside the container".
+- With the kill performed, the counter assertion **does not hold**: the gateway pid moved
+  `612 → 919` (s6 restarted it) while `docker inspect --format '{{.RestartCount}}
+  {{.State.StartedAt}}' robotina` stayed `0 2026-09-22T19:06:53.652872543Z`. **Root cause: `hermes
+  gateway` is itself an s6-supervised dynamic service** — `/run/service/gateway-default/run` runs
+  `hermes gateway run --replace`, supervised by `s6-supervise gateway-default`; the container's main
+  program (the `rc.init` child) is a separate `sleep infinity` (pid 306, uid 10000). Killing the
+  gateway can never cycle the container.
+- Killing the **actual** main program (`rc.init` child `sleep infinity`, pid 306, as uid 10000) does
+  start the container's shutdown — the log shows `Terminated` and the `s6-rc: info: service …
+  stopping` sequence — but the shutdown **WEDGES**: `s6-rc -v2 -bda change` (pid 1054) waited while
+  `opencode` (533), `engram` (222) and `gateway-default` (919) stayed alive, and the container did
+  **not** exit. `RestartCount` stayed `0` and `StartedAt` unchanged for the full 180 s observation
+  window. **Root cause: the same dropped `CAP_KILL`.** The s6 supervisors run as root without
+  `CAP_KILL`, so they cannot signal their uid-10000 children on a bring-down; the tree never comes
+  down, PID 1 never exits, and `restart: unless-stopped` (which reacts to PID-1 exit, not to health)
+  never fires.
+- **Conclusion:** AC8's claim "container exit follows Hermes' main program … the container goes down
+  and comes back as one unit" is **not satisfied** with the current supervision topology and
+  five-capability set. This is a real finding for `sdd-verify`: either the main program must be the
+  supervised unit (vendor change), or `CAP_KILL` must be added (a hardening-set decision), or AC8's
+  proof must be re-worded to what the architecture actually guarantees (s6 restarts a service in
+  place; the container exits only on an operator/daemon stop). No fix was attempted here — it is a
+  design/decision change outside this slice's edit surfaces.
+- **Recovery after the observation:** the wedged container was restored cleanly with
+  `docker compose up -d --force-recreate robotina`; the stack is healthy and running (see header).
+
+### Stack state at the end of this slice
+
+```text
+docker compose ps
+egress-proxy   Up … (healthy)   3128/tcp
+robotina       Up … (healthy)
+docker volume ls | grep -cE '^robotina_(engram|opencode)_db$'   # 2
+opencode health  -> {"healthy":true,"version":"1.18.32"}
+Telegram         -> [Telegram] Connected to Telegram (polling mode)
+```
+
 ## Next step
 
-Continue `sdd-apply` on the remaining tasks — 21, 22, 26, 27, 28, 38, 40, 41, 42, 43, 44 and 45 —
-as the next slices (runtime verification, measurement evidence, final rollback/secret audit), then
+Runtime verification continues. Task 28's single-lifecycle proof is **blocked by a real defect**
+(no `CAP_KILL` → the internal s6 shutdown wedges; the gateway is s6-supervised, not the main
+program) and needs a design/user decision before it can pass. The remaining tasks are 26 (peak
+`pids.current` under the concurrent worst case — needs the live worst-case workload), 38 (the
+`pids_limit` rule, gated on 26), 28, and the final verification/rollback/secret audit (40, 41, 42,
+43, 44, 45; 40 also consumes this slice's gate-failure and capability evidence). When those close,
 run `sdd-archive` (T9). Delivery (T10: branch pushed, PR opened) stays a separate user decision.
-The measurement-dependent tasks (26, 38, 40, 41) cannot close until the concurrent-worst-case
-`pids.current` peak is sampled.
