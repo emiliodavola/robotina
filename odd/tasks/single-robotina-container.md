@@ -638,7 +638,7 @@ healthy.
   lines** (non-empty) including `robotina: engram serve (data dir /opt/data/.engram)` and
   `robotina: opencode serve -> 127.0.0.1:4096 (uid 10000)`.
 
-### Task 28 — s6 recovery (verified) and the single-lifecycle proof (FAILED)
+### Task 28 — s6 recovery (verified) and the single-lifecycle proof (FAILED as written; resolved in slice 10)
 
 **s6 recovery — verified.** `pgrep -f "[o]pencode serve"` (non-empty, pid 227) → `pkill -f
 "[o]pencode serve"` → the bounded credential-aware probe recovered **without manual
@@ -692,12 +692,96 @@ opencode health  -> {"healthy":true,"version":"1.18.32"}
 Telegram         -> [Telegram] Connected to Telegram (polling mode)
 ```
 
+## Slice 10 — `CAP_KILL` + corrected lifecycle contract (task 28 closed)
+
+Branch: `feat/single-robotina-container-10-capkill`. This slice fixes the defect slice 09 exposed
+and amends every artifact that stated something the measurements proved false. The user decided
+both halves: (1) add `CAP_KILL` (five → six capabilities, bounding mask `0xeb`); (2) the lifecycle
+contract is "s6 supervises and restarts the gateway", not "the container dies with Hermes".
+
+### Changes
+
+- `compose.yml`: `cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]`; the Spanish
+  comment records why (s6 must signal its uid-10000 children; the app uid keeps `CapEff=0x0`).
+- Spec `agent-container` AC4 (six-capability requirement, mask `0xeb`) and AC8 (lifecycle scenario
+  rewritten to the measured contract), both with an explicit AMENDMENT note.
+- `design.md`: §6 single-lifecycle statement corrected, §13 Q4 row/table/§14 mask updated,
+  §15/§17 compose rows updated, and a new **§13.3 AMENDMENT at apply** recording both decisions;
+  §19.1 marked RESOLVED (its proposed amendment was itself wrong).
+- `proposal.md`: R4 corrected (and the A4/R3 rows and the §3.1/§4.3/§4.5/phase-result claims that
+  repeated the same falsehood).
+- `SECURITY.md` (Spanish): R4 corrected, capability entry updated to six with the measured
+  `CapEff=0x0`, and a new measured **«Apagado y ciclo de vida»** section.
+- `tasks.md`: task 28's proof rewritten to the corrected contract; defect + resolution recorded;
+  task 28 checked off after the observations below.
+
+### Verification (observed on the live stack, 2026-09-22)
+
+```text
+# recreate with the new capability set
+docker compose config -q                                          # exit 0
+docker compose up -d --force-recreate robotina                     # Recreated / Started
+
+# masks (task 25/AC4)
+docker compose exec robotina sh -c 'grep -E "Cap(Bnd|Eff)" /proc/1/status'
+  # PID 1: CapEff=00000000000000eb  CapBnd=00000000000000eb  Uid=0  NoNewPrivs=1
+docker compose exec robotina sh -c 'pgrep -f "[o]pencode serve" ...'
+  # pid=213 uid=10000  CapEff=0x0  CapPrm=0x0  CapBnd=0xeb  CapAmb=0x0  NoNewPrivs=1
+# 0xeb = 235 = CHOWN(1)+DAC_OVERRIDE(2)+FOWNER(8)+KILL(32)+SETGID(64)+SETUID(128)
+
+# graceful shutdown (AC8 amended, F2 closed)
+start=$(date +%s%N); docker compose stop robotina; end=$(date +%s%N)
+  # Stopping / Stopped; stop_duration_ms=5504 -> 5.50 s
+  # ExitCode=0  OOMKilled=false  FinishedAt=2026-09-22T19:25:47.360681404Z
+  # log: opencode-ready -> opencode -> main-hermes -> dashboard -> engram -> opencode-init
+  #      -> legacy-cont-init -> fix-attrs, all "successfully stopped"; gateway got SIGTERM
+  # (before CAP_KILL the same stop wedged and Docker SIGKILLed at the 20 s grace period)
+
+# task-28 recovery proof (AC5)
+docker compose exec robotina sh -c 'pgrep -f "[o]pencode serve" | head -1'   # 211
+docker compose exec robotina sh -c 'pkill -f "[o]pencode serve"'            # exit 0 (root now has CAP_KILL)
+<bounded credential-aware probe 30x2s>                                       # exit 0 in 4.37 s, no manual step
+docker compose exec robotina sh -c 'pgrep -f "[o]pencode serve" | head -1'   # 416
+logs: "robotina: opencode salio (exit=256 sig=15); reinicio #1 en 1s"
+
+# corrected lifecycle contract (AC8 amended)
+before: gateway pid 188 | RestartCount=0 StartedAt=2026-09-22T19:26:33.780458019Z
+docker compose exec -u hermes robotina sh -c 'pkill -f "[h]ermes gateway"'   # exit 0
+after 20 s: gateway pid 506 | RestartCount=0 StartedAt=2026-09-22T19:26:33.780458019Z
+  # GATEWAY_RESTARTED_IN_PLACE=yes  CONTAINER_NOT_CYCLED=yes
+  # gateway log: "gateway is now running under s6 supervision (auto-restart on crash ...)"
+
+# final stack state
+docker compose ps            # egress-proxy (healthy), robotina Up (healthy)
+docker compose exec robotina /command/s6-rc -a list | wc -l                  # 10
+curl credential-aware /global/health                                         # {"healthy":true,"version":"1.18.32"}
+logs: "[Telegram] Connected to Telegram (polling mode)"
+```
+
+### Findings for the parent
+
+- **F1 (resolved).** The slice-09 finding "AC8's container-cycle proof fails" is closed by the
+  amendment: the proof asserted a contract that never existed.
+- **F2 (resolved).** The non-graceful in-container shutdown is fixed by `CAP_KILL` (5.50 s,
+  exit 0).
+- **F3 (open, out of scope).** `README.md` line ~345 and `README.en.md` line ~358 still claim
+  "if the main program goes down, the container goes with it". They are **not** in this slice's
+  allowed edit surfaces, so they were not touched and must be corrected before `verify`/`archive`.
+- **F4 (open, out of scope).** `explore.md` (lines ~101, ~257–263, ~574, ~641) records the same
+  pre-measurement assumption. It is a frozen phase artifact; a correction note is a parent
+  decision, not an apply edit.
+- Task 26 (peak `pids.current`), 38, 40, 41 and 42–45 were **not** started, per the slice scope.
+
 ## Next step
 
-Runtime verification continues. Task 28's single-lifecycle proof is **blocked by a real defect**
-(no `CAP_KILL` → the internal s6 shutdown wedges; the gateway is s6-supervised, not the main
-program) and needs a design/user decision before it can pass. The remaining tasks are 26 (peak
-`pids.current` under the concurrent worst case — needs the live worst-case workload), 38 (the
-`pids_limit` rule, gated on 26), 28, and the final verification/rollback/secret audit (40, 41, 42,
-43, 44, 45; 40 also consumes this slice's gate-failure and capability evidence). When those close,
-run `sdd-archive` (T9). Delivery (T10: branch pushed, PR opened) stays a separate user decision.
+Runtime verification continues, with task 28 now **closed**. The task-28 defect was resolved in
+slice 10: `CAP_KILL` was added (six capabilities, bounding mask `0xeb`) and the lifecycle contract
+was corrected to "s6 supervises and restarts the gateway in place; the container exits when the
+supervision tree goes down". Remaining: 26 (peak `pids.current` under the concurrent worst case —
+needs the live worst-case workload), 38 (the `pids_limit` rule, gated on 26), 40 (the measured
+`SECURITY.md` evidence entries — it must now fold in the six-capability masks, the 5.50 s stop
+and the slice-09 gate-failure observation), 41 (finalize the change record) and the final
+verification/rollback/secret audit (42–45). `README.md`/`README.en.md` still carry the stale
+"container goes with the main program" claim and must be corrected before `verify`/`archive`.
+When those close, run `sdd-archive` (T9). Delivery (T10: branch pushed, PR opened) stays a
+separate user decision.

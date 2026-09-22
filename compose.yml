@@ -244,10 +244,18 @@ services:
       start_period: 90s
     <<: *hardening
     # s6-overlay baja privilegios con `s6-setuidgid hermes` (initgroups →
-    # SETUID/SETGID) y ajusta el dueno del volumen (CHOWN/DAC_OVERRIDE/FOWNER).
+    # SETUID/SETGID), ajusta el dueno del volumen (CHOWN/DAC_OVERRIDE/FOWNER) y
+    # necesita poder senalar a sus hijos de uid 10000 para bajarlos (KILL).
     # Con `cap_drop: [ALL]` el arranque muere con:
     #   s6-applyuidgid: fatal: unable to set supplementary group list: Operation not permitted
-    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    # Sin KILL el arranque funciona pero el apagado iniciado adentro se traba:
+    # los supervisores root no pueden senalar a los servicios de uid 10000, el
+    # arbol s6 no baja, PID 1 no sale y Docker termina mandando SIGKILL pasado
+    # `stop_grace_period`. Medido: los procesos de uid 10000 quedan con
+    # CapEff=0x0, asi que no pueden ganar KILL por su cuenta; readmitirla en el
+    # contenedor restaura la mecanica de supervision sin ampliar lo que puede
+    # hacer el agente. Mascara de bounding set resultante: 0xeb.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]
 
 # Bases SQLite en modo WAL: en volumenes NATIVOS anidados dentro del bind de
 # /opt/data, porque WAL sobre una carpeta de Windows puede corromperse en

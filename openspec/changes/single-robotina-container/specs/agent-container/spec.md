@@ -106,18 +106,26 @@ entrypoint rejects arbitrary uids and the non-PID-1 fallback starts no supervise
 - THEN the command succeeds and lists the supervised services (non-empty output)
 - PROOF: `docker compose exec robotina s6-rc -a list`
 
-### Requirement: AC4 — Merged hardening and the five-capability set
+### Requirement: AC4 — Merged hardening and the six-capability set
 
-`robotina` SHALL keep `cap_drop: [ALL]` plus exactly the five capabilities Hermes requires
-(`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`), `no-new-privileges:true`,
+`robotina` SHALL keep `cap_drop: [ALL]` plus exactly the six capabilities the supervision tree
+requires (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`, `KILL`), `no-new-privileges:true`,
 `ulimits.core: 0`, a bounded `pids_limit`, and bounded `json-file` logs.
 
-#### Scenario: The effective capability set is exactly the five required capabilities
+AMENDMENT (apply, task 28): the set was **five** capabilities in the original requirement
+(`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`; bounding mask `0xcb`). Measured at
+runtime, `cap_drop: [ALL]` without `KILL` left the root s6 supervisors unable to signal their
+uid-10000 services: an in-container shutdown wedged and Docker had to SIGKILL after
+`stop_grace_period`. `KILL` restores the supervision mechanics and does **not** widen what the
+agent can do — the uid-10000 processes keep `CapEff=0x0` (design §13, amended). The requirement's
+meaning is unchanged: a minimal, explicitly enumerated set under `cap_drop: [ALL]`.
+
+#### Scenario: The effective capability set is exactly the six required capabilities
 
 - GIVEN the stack is up
 - WHEN PID 1's capability masks are read
 - THEN the printed masks decode to exactly `cap_chown`, `cap_dac_override`, `cap_fowner`,
-  `cap_setgid`, `cap_setuid` (the five-bit mask `0x00000000000000cb`)
+  `cap_setgid`, `cap_setuid`, `cap_kill` (the six-bit mask `0x00000000000000eb`)
 - PROOF: `docker compose exec robotina sh -c 'grep -E "Cap(Bnd|Eff)" /proc/1/status'`
 
 #### Scenario: No new privileges can be gained
@@ -244,27 +252,48 @@ SHALL publish no port.
 
 ### Requirement: AC8 — The accepted merged-container regressions are documented with measurements
 
-The merge accepts a single lifecycle and per-container capabilities (proposal §6.2 R3, R4).
-SECURITY.md SHALL state the single-lifecycle behavior and SHALL record the **measured**
-capability set of the uid-10000 OpenCode process (proposal §14 Q4). No explicit capability
-dropping SHALL be added to the OpenCode process (frozen: D2).
+The merge accepts **one** container lifecycle shared by every process inside it, and
+per-container capabilities (proposal §6.2 R3, R4). SECURITY.md SHALL state the **measured**
+lifecycle behavior — s6 supervises `gateway-default` (`hermes gateway run`) and restarts it in
+place, so a Hermes gateway crash does **not** cycle the container; the container's PID 1 is the
+s6 supervision tree and the container exits when that tree goes down — and SHALL record the
+**measured** capability set of the uid-10000 OpenCode process (proposal §14 Q4). No explicit
+capability dropping SHALL be added to the OpenCode process (frozen: D2).
 
-#### Scenario: Container exit follows Hermes' main program
+AMENDMENT (apply, task 28): the requirement originally stated that the container's main program
+was Hermes and that a Hermes exit took the container down. Measured at runtime, `hermes gateway`
+runs as the s6-supervised service `gateway-default` (restarted in place, `RestartCount`
+unchanged), and the container's main program is a separate `rc.init` child. The scenario below
+was rewritten to the measured contract. The accepted consequence (proposal R4) is that the
+gateway and the rest of the container are **one** failure domain, not two — the merge does not
+give the gateway a private restart.
+
+#### Scenario: A gateway crash is restarted by s6 and does not cycle the container
 
 - GIVEN the stack is up and the unit's restart counter and start time have been captured
-- WHEN the Hermes main program is terminated inside the container
-- THEN the container goes down and comes back **as one unit** — the restart counter increases and
-  the start time moves, so `opencode`/`engram` did not survive independently
+- WHEN the `hermes gateway` process is terminated inside the container
+- THEN s6 restarts the `gateway-default` service in place (a new, non-empty gateway pid) while the
+  container's `RestartCount` and `StartedAt` stay **unchanged** — the container did not cycle
 - PROOF:
   1. before: `docker inspect --format '{{.RestartCount}} {{.State.StartedAt}}' robotina`
-  2. terminate: `docker compose exec robotina sh -c 'pkill -f "[h]ermes gateway"'`
-  3. after: `docker inspect --format '{{.RestartCount}} {{.State.StartedAt}}' robotina` —
-     `RestartCount` MUST be greater than in step 1 and `StartedAt` MUST have moved
-- NOTE: `restart: unless-stopped` brings PID 1 back within a fraction of a second, so "the
-  container is not running" cannot be observed and MUST NOT be the assertion. The unit-restart
-  observation proves the same property — one unit went down and came back — without racing the
-  restart policy. The narrow `--format` keeps the secret-safety rule (`docker inspect` never
-  prints `.Config.Env`).
+  2. terminate as the owning uid — the faithful "kill the process inside the container" form
+     (with `KILL` readmitted by AC4 a root exec can now signal uid 10000 too, but the recipe keeps
+     the uid-10000 form):
+     `docker compose exec -u hermes robotina sh -c 'pkill -f "[h]ermes gateway"'`
+  3. after: `docker compose exec robotina sh -c 'pgrep -f "[h]ermes gateway" | head -1'` prints
+     a **non-empty** pid that differs from the one captured in step 1 (an empty match is a
+     FAILURE, never a pass), and
+     `docker inspect --format '{{.RestartCount}} {{.State.StartedAt}}' robotina` is unchanged
+- NOTE: the container surviving the gateway kill is now the **expected** result, not a failure:
+  `gateway-default` is an s6 service, so the gateway's lifetime belongs to the supervision tree,
+  not to the container.
+- NOTE: the container exits when the **s6 supervision tree** (PID 1) goes down — an operator
+  `docker compose stop robotina`/`docker kill` of PID 1 — and `restart: unless-stopped` then
+  brings the whole unit back. With `KILL` in the capability set (AC4, amended) that shutdown is
+  graceful inside the grace period instead of relying on SIGKILL; the measured stop duration is
+  recorded in SECURITY.md.
+- NOTE: the narrow `--format` keeps the secret-safety rule (`docker inspect` never prints
+  `.Config.Env`).
 - CAUTION: destructive by design — run it at the end of a verification session, before
   restarting the stack.
 
