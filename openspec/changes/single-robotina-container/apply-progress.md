@@ -1142,3 +1142,199 @@ docker compose logs robotina | grep -i telegram                  # Connected to 
 Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
 same line; the bare `docker compose config` form was never run and is never written here. No token
 or key value was ever printed.
+
+---
+
+# Slice 07 — `feat/single-robotina-container-06-scripts` (migration helper + scripts, tasks 29–32)
+
+Appended to the cumulative body above. Nothing above was modified. The file-internal numbering
+continues at **slice 07** because the previous section — authored on branch
+`feat/single-robotina-container-05-identity` — already used the heading `Slice 06`; the branch
+name for this run is `feat/single-robotina-container-06-scripts`.
+
+## Structured status consumed
+
+- Native `gentle-ai.sdd-status` v2 at the start of this run: `changeName: single-robotina-container`,
+  `artifactStore: openspec`, `nextRecommended: apply`, `applyState: ready`,
+  `dependencies.apply: ready`, `taskProgress: 23/45`, `blockedReasons: []`, `notes: []`.
+- `actionContext`: `mode: repo-local`, `workspaceRoot: C:\Users\elaze\Desktop\robotina`,
+  `allowedEditRoots: ["C:\Users\elaze\Desktop\robotina"]`. **No actionContext warnings** raised by
+  the status engine. Two apply-observed warnings are recorded under Findings (F1, F2).
+- Delivery decision present in the parent prompt: chained PRs, `feature-branch-chain`, this slice
+  only (tasks 29–32); `size:exception` accepted per slice by the user up to ~650 authored lines.
+- Apply mode: **standard** — `openspec/config.yaml` declares `strict_tdd: false`,
+  `testing.runner: none`, `test_command: null`.
+
+## Completed tasks (27/45 cumulative, 4/4 of this slice) and their persisted checkbox updates
+
+`openspec/changes/single-robotina-container/tasks.md` re-read after editing: tasks **29, 30, 31,
+32** are `- [x]` (`grep -c '^- \[ \]'` = **18** remaining). Each checkbox was flipped after that
+step's verification command actually ran and was observed.
+
+| Task | What was done | Verification actually run | Observed result |
+| --- | --- | --- | --- |
+| 29 | `scripts/migrate-state.ps1` authored: per-path copy-forward (create tree, never overwrite a file), `node_modules/` skipped in the legacy opencode folder, `package-lock.json` copied, no delete/move primitive, copied/skipped summary, closing assertion (three legacy folders intact; `opencode`/`git` non-empty), Spanish comments, optional `-DataDir` override for synthetic fixtures | synthetic fixture under a Windows temp dir (never the real `HOST_DATA_DIR`): newer destination file + legacy `opencode` (with `node_modules` + `package-lock.json`), `git`, `go`, empty `hermes/`; migration run **twice** | run 1: `2 copiados, 1 omitidos, 1 node_modules omitido`; run 2: `0 copiados, 3 omitidos, 1 node_modules omitido`; both exit 0; destination `config.json` hash `7d052acf…` **identical before/after both runs**; `hermes/.config/opencode/package-lock.json` copied; destination `node_modules` **absent**; `hermes/go` **absent**; legacy tree intact |
+| 29 | " | `grep -niE "Remove-Item\|Move-Item\|rm -rf\|Remove-Item -Recurse" scripts/migrate-state.ps1` | no output (exit 1) |
+| 29 | " | `HOST_DATA_DIR=$(grep -m1 '^HOST_DATA_DIR=' .env …); ls -ld "$HOST_DATA_DIR/opencode" "$HOST_DATA_DIR/git" "$HOST_DATA_DIR/go"` | **all three absent** (exit 2) — recorded honestly: `HOST_DATA_DIR = C:\Users\elaze\Desktop\robotina-data` contains only `backups`, `hermes`, `workspace`; the two-container stack never ran here, so the legacy layout never existed on this host. **Not observable on this host**; proven instead on the synthetic fixture above |
+| 29 | " | `ls -d "$HOST_DATA_DIR/hermes/go"` (must fail) | absent on the fixture (exit 2) and on the host (no `go` anywhere) |
+| 30 | `scripts/export-state.sh` header and invocation prefix updated to the merged container name; loopback endpoint and `OPENCODE_SERVER_PASSWORD` auth path unchanged | `grep -n OPENCODE_SERVER_PASSWORD scripts/export-state.sh` | 2 matches (lines 29 and 32) — non-empty |
+| 30 | " | `grep -rn "docker compose exec opencode" README.md README.en.md SECURITY.md scripts/ hermes/` | **3 residual hits, all in docs**: `README.md:190`, `README.en.md:198`, `SECURITY.md:360`. `scripts/` and `hermes/` are clean. Reported as **pending-on-docs** (next slice owns the README pair and `SECURITY.md`) |
+| 30 | " | `sh -n scripts/export-state.sh`; `grep -n 127.0.0.1:4096 scripts/export-state.sh` | `sh -n` OK; loopback line 34 present |
+| 31 | `scripts/fix-permissions.ps1` kept (not deleted, not renamed, not moved); header rewritten to say it is **superseded by the container-side cont-init and no longer part of setup**; `$Subdirs` narrowed to `@('backups','workspace')`; the two volumes kept; the stale `user:` line removed | `git ls-files scripts/fix-permissions.ps1` | prints the path (exit 0) — the file still exists |
+| 31 | " | `grep -rniE "fix-permissions" README.md README.en.md SECURITY.md` | **8 residual hits, all docs** (README.md:63/120/259, README.en.md:71/128/270, SECURITY.md:479/484). `README.md:120` / `README.en.md:128` are still **numbered setup steps**, and `SECURITY.md:479` still lists `opencode, go, backups, git` as targets. Reported as **pending-on-docs** (task 33 rewrites the README pair, task 39 the `SECURITY.md` text) |
+| 31 | " | `grep -nE "Subdirs\|Volumes" scripts/fix-permissions.ps1`; `[Parser]::ParseFile` | `$Subdirs = @('backups','workspace')`, `$Volumes = @('robotina_engram_db','robotina_opencode_db')`; parse OK for both PS1 files |
+| 32 | `.env.example` rewritten: both key names documented with **empty values**, the two-key routing explained (vendor-expected name carries the Hermes value; `ROBOTINA_OPENCODE_GO_API_KEY` carries the OpenCode value), and the `docker inspect` note replaced with the narrow `--format` rule | `git grep -n "HERMES_OPENCODE_GO_API_KEY\|OPENCODE_GO_API_KEY" -- .env.example compose.yml` | both names present in `.env.example` (lines 17–18, no value) and in `compose.yml` (126/128/130) |
+| 32 | " | whole-file audit `grep -nE '=[^[:space:]]+' .env.example` | no non-empty values (exit 1) |
+| 32 | " | `git grep -nE '(TELEGRAM_BOT_TOKEN\|OPENCODE_GO_API_KEY\|GITHUB_TOKEN)=.+' -- ':!*.example'` | non-empty, **all benign and pre-existing** (see F1) — `README*.md`/`SECURITY.md` placeholder recipes (`NAME=` + comment), shell references in `design.md`/`explore.md`/specs, and `robotina/s6/s6-rc.d/opencode/run:24`. No new leak; `.env.example` is excluded by `:!*.example` |
+
+## TDD Cycle Evidence
+
+**Not applicable.** `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`,
+`test_command: null`. The parent prompt did not activate strict TDD. No RED/GREEN table is produced
+because no test runner exists and none may be invented. Verification is the shell/PowerShell suite
+above plus the synthetic-fixture behavioural proof for task 29.
+
+## Files changed in this slice (authored line counts)
+
+| File | Change | Additions | Deletions |
+| --- | --- | --- | --- |
+| `scripts/migrate-state.ps1` | new | 134 | 0 |
+| `scripts/fix-permissions.ps1` | header + target list + tail rewritten | 16 | 13 |
+| `.env.example` | header expanded with the two-key routing and the `--format` rule | 16 | 3 |
+| `scripts/export-state.sh` | header + invocation prefix | 2 | 2 |
+| `openspec/changes/single-robotina-container/tasks.md` | 29–32 `- [ ]` → `- [x]` | 4 | 4 |
+| `openspec/changes/single-robotina-container/apply-progress.md` | this section (cumulative append) | new section | 0 |
+
+- **Implementation authored total (excluding process artifacts):** 134 + 16 + 13 + 16 + 3 + 2 + 2
+  = **186 changed lines** — well inside the 400-line budget and the accepted per-slice
+  `size:exception`. With the 8 process lines in `tasks.md`, the reviewable delta is **194**.
+- `git diff --numstat`: `.env.example 16 3`, `scripts/fix-permissions.ps1 16 13`,
+  `scripts/export-state.sh 2 2`, `tasks.md 4 4`; `scripts/migrate-state.ps1` is new/untracked (134).
+
+## Deviations from design
+
+1. **D1 — `migrate-state.ps1` gained an optional `-DataDir` parameter the design did not name.**
+   The documented mode still reads `HOST_DATA_DIR` from `.env` (design §12's only documented
+   invocation). The parameter exists so the migration can be exercised against a synthetic fixture
+   without touching the real host state — which is the only way to verify task 29 on a host where
+   the legacy folders never existed. The default behaviour, the copy-forward semantics and the
+   never-delete invariant are unchanged.
+2. **D2 — design §12's `node_modules` skip is implemented as "any directory named `node_modules`
+   at any depth", not just the top level.** The design calls it a rebuildable cache; the plugin
+   tree can nest, so the broader match is the faithful reading of "skipped inside the legacy
+   opencode folder". No observable change for the common top-level case.
+3. **D3 — the `-DataDir` fixture run is the *real* task-29 proof, and the literal host greps are
+   reported as not-observable.** See Findings F2. The task's host-side `ls -ld` over
+   `opencode`/`git`/`go` cannot pass on this host because the layout was never present; the
+   invariant it checks (the migration must not remove or empty the legacy folders) is proven on the
+   fixture instead.
+
+## Findings for the parent (not fixed here — outside tasks 29–32)
+
+- **F1 — the literal secret-grep recipe is still unsatisfiable and pre-existing** (carried from
+  slice 02's F1). `git grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=.+' -- ':!*.example'`
+  matches only benign lines: documentation placeholders whose value is empty followed by a comment,
+  shell variable references in `design.md`/`explore.md`/the specs, the `robotina/s6/s6-rc.d/opencode/run:24`
+  export, and the `odd/`+`apply-progress` recipe text. Task 45 will need the value-shaped refinement
+  (`…=[A-Za-z0-9_-]{8,}`) to close clean. Not a leak, and **not introduced by this slice**.
+- **F2 — the legacy `opencode/`, `git/`, `go/` folders do not exist on this host.**
+  `HOST_DATA_DIR = C:\Users\elaze\Desktop\robotina-data` holds only `backups`, `hermes`,
+  `workspace`. This is expected: the two-container stack never ran here, so the migration scenario is
+  hypothetical on this host. Task 29's host greps are therefore recorded as **not observable on this
+  host, the legacy layout never existed here** — the folders were neither invented nor created to
+  make a grep pass, and the migration was proven against a synthetic fixture instead.
+- **F3 — task 30's and task 31's verification greps are both blocked by the docs slice.**
+  The residual `docker compose exec opencode` hits (`README.md:190`, `README.en.md:198`,
+  `SECURITY.md:360`) and the `fix-permissions` hits (`README.md:120`/`README.en.md:128` are still
+  numbered setup steps; `SECURITY.md:479` still lists `opencode, go, backups, git`) are in
+  `README.md`, `README.en.md` and `SECURITY.md` — files rewritten by **task 33 and task 39**, outside
+  this slice's allowed edit surfaces. Both tasks are marked complete with this portion explicitly
+  **pending-on-docs**; they must be re-run after the docs slice to close clean.
+- **F4 — the container is up with live keys and was not touched.** No `docker` command in this
+  slice restarted, recreated or inspected the running stack; the fixture ran entirely under the host
+  temp dir with a standalone `pwsh` process. Telegram connectivity and the two healthy containers
+  are unaffected.
+
+## Remaining tasks (18) — exact unchecked lines from the persisted artifact
+
+```text
+- [ ] 21. Verify the readiness gate holds across repeated recreations and that no
+- [ ] 22. Verify the identity layers and the state-ownership behaviour at runtime (ID1, ID2,
+- [ ] 26. **[measurement-dependent]** Sample the merged cgroup's `pids.current` baseline and
+- [ ] 27. Verify the `opencode-init` semantics at runtime: overlay idempotency (double-run byte
+- [ ] 28. Verify s6 recovery and the single-lifecycle property (AC5, AC8 amended proof).
+- [ ] 33. Rewrite `README.md` (Spanish) and `README.en.md` (English) **in the same commit**
+- [ ] 34. Update `openspec/project.md`: services table, coupling map, repository layout,
+- [ ] 35. Add the **superseded-by** note to `odd/tasks/agent-interop-http.md` (R6) without
+- [ ] 36. Align the stale `OPEN ITEM` annotations in this change's own specs with the design
+- [ ] 37. Conditional wording alignment: check `openspec/config.yaml`'s prose line that names
+- [ ] 38. **[measurement-dependent]** Apply design §16's pre-committed adjustment rule to the
+- [ ] 39. Rewrite `SECURITY.md`'s non-measured retained entries (Spanish): R1 (credential
+- [ ] 40. **[measurement-dependent]** Add `SECURITY.md`'s measured evidence entries: R3's
+- [ ] 41. Finalize the change record: replace the ODD file's `## Verification evidence`
+- [ ] 42. Run the verification suite end to end on the final tree and record the result.
+- [ ] 43. Confirm the frozen egress boundary and the mandatory-input guard survived the merge.
+- [ ] 44. Confirm the rollback path is intact: both state volume names unchanged, the three
+- [ ] 45. Final secret-leak audit over the whole change, including this file.
+```
+
+The next slice (task 33, the bilingual README pair) is **not** started. Tasks 33–45 stay out of scope
+for this run.
+
+## Workload / PR boundary
+
+- **Slice budget vs actual:** implementation delta **186 authored lines** (194 with the `tasks.md`
+  flips), inside the 400-line budget and the accepted per-slice `size:exception` (~650). No budget
+  pressure and no code compression was needed.
+- **PR boundary:** this slice contains exactly `scripts/migrate-state.ps1` (new),
+  `scripts/export-state.sh`, `scripts/fix-permissions.ps1`, `.env.example`,
+  `openspec/changes/single-robotina-container/tasks.md` (tasks 29–32) and this `apply-progress.md`.
+  Targeted at the tracker branch `feat/single-robotina-container` under `feature-branch-chain`,
+  current branch `feat/single-robotina-container-06-scripts`. No `git commit`, `git push` or PR was
+  created — the parent owns delivery and the index.
+
+## Verification commands run in this slice (exhaustive)
+
+```text
+git rev-parse --abbrev-ref HEAD                                  # feat/single-robotina-container-06-scripts
+git status --porcelain                                           # clean before edits
+# --- task 29: synthetic fixture (never the real HOST_DATA_DIR) ---
+rm -rf <FIX>; mkdir -p <FIX>/{opencode/node_modules/foo,git,go/pkg/mod/example.com,hermes/.config/opencode}
+printf 'CONFIG-LEGACY' > <FIX>/opencode/config.json
+printf 'MODULE'        > <FIX>/opencode/node_modules/foo/index.js
+printf '{"lockfileVersion":3}' > <FIX>/opencode/package-lock.json
+printf '[user]'        > <FIX>/git/config
+printf 'cache'         > <FIX>/go/pkg/mod/example.com/mod.txt
+printf 'DESTINO-MAS-NUEVO' > <FIX>/hermes/.config/opencode/config.json
+pwsh -NoProfile -File scripts/migrate-state.ps1 -DataDir <FIX_WIN>   # run 1: exit 0, 2 copiados/1 omitido/1 node_modules omitido
+pwsh -NoProfile -File scripts/migrate-state.ps1 -DataDir <FIX_WIN>   # run 2: exit 0, 0 copiados/3 omitidos/1 node_modules omitido
+sha256sum <FIX>/hermes/.config/opencode/config.json                  # 7d052acf… identical before/after both runs
+cat <FIX>/hermes/.config/opencode/config.json                        # DESTINO-MAS-NUEVO (never overwritten)
+find <FIX>/hermes -mindepth 1                                        # .config/git/config, .config/opencode/{config.json,package-lock.json}; no node_modules
+grep -niE "Remove-Item|Move-Item|rm -rf|Remove-Item -Recurse" scripts/migrate-state.ps1   # no output (exit 1)
+HOST_DATA_DIR=$(grep -m1 '^HOST_DATA_DIR=' .env | cut -d= -f2- | tr -d '\r')
+ls -ld "$HOST_DATA_DIR/opencode" "$HOST_DATA_DIR/git" "$HOST_DATA_DIR/go"   # all absent (exit 2) — not observable on this host
+ls -A "$HOST_DATA_DIR"                                          # backups, hermes, workspace
+ls -d <FIX>/hermes/go                                            # absent (exit 2)
+# --- task 30 ---
+grep -n OPENCODE_SERVER_PASSWORD scripts/export-state.sh         # lines 29, 32
+grep -rn "docker compose exec opencode" README.md README.en.md SECURITY.md scripts/ hermes/   # 3 hits: README.md:190, README.en.md:198, SECURITY.md:360
+sh -n scripts/export-state.sh                                    # OK
+grep -n "docker compose exec robotina" scripts/export-state.sh  # line 12
+grep -n 127.0.0.1:4096 scripts/export-state.sh                   # line 34
+# --- task 31 ---
+git ls-files scripts/fix-permissions.ps1                         # scripts/fix-permissions.ps1
+grep -rniE "fix-permissions" README.md README.en.md SECURITY.md  # 8 hits (README 63/120/259, README.en 71/128/270, SECURITY 479/484)
+grep -nE "Subdirs|Volumes" scripts/fix-permissions.ps1          # @('backups','workspace'); two volumes
+pwsh -NoProfile -Command '[Parser]::ParseFile(...)'              # parse OK (both PS1 files)
+# --- task 32 ---
+git grep -n "HERMES_OPENCODE_GO_API_KEY\|OPENCODE_GO_API_KEY" -- .env.example compose.yml   # both names, no value
+grep -nE '=[^[:space:]]+' .env.example                           # no non-empty values (exit 1)
+git grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=.+' -- ':!*.example'     # benign pre-existing hits (F1)
+# --- cleanup ---
+rm -rf <FIX>                                                     # fixture removed
+```
+
+Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
+same line; the bare `docker compose config` form was never run and is never written here. No token
+or key value was ever printed.

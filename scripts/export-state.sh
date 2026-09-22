@@ -8,8 +8,8 @@
 # viven en volumenes nativos, donde WAL es seguro. Este script devuelve ese
 # estado al host en un formato que si es portable y legible: JSON.
 #
-# Se ejecuta DENTRO del contenedor de opencode (ahi viven los dos CLIs):
-#   docker compose exec opencode sh /opt/export-state.sh
+# Se ejecuta DENTRO del contenedor unico `robotina` (ahi viven los dos CLIs):
+#   docker compose exec robotina sh /opt/export-state.sh
 #
 # Escribe en /backups, que compose monta sobre ${HOST_DATA_DIR}/backups.
 set -eu

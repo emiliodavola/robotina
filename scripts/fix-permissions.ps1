@@ -1,22 +1,25 @@
 #!/usr/bin/env pwsh
-# Deja con uid 10000 las carpetas y volumenes que escribe el contenedor de
-# opencode.
+# Herramienta de REPARACION; ya NO forma parte del setup.
 #
-# Por que: los dos agentes comparten /workspace y, con `cap_drop: ALL`, un
-# proceso sin CAP_DAC_OVERRIDE no puede escribir archivos de otro uid. Medido:
-# root crea 0644 y el usuario `hermes` (uid 10000) 0664, asi que NINGUNO podia
-# editar lo del otro. La imagen de Hermes descarta HERMES_UID=0 (valida 1-65534),
-# asi que se alinea al reves: opencode corre como uid 10000.
+# SUPERSEDED: el chown de arranque lo hace ahora el cont-init del contenedor
+# (`robotina/s6/cont-init.d/10-robotina-state`), que corre como root en cada
+# start y deja el estado escribible por el uid 10000 sin ningun paso
+# privilegiado en el host. Este script queda solo para reparar a mano un arbol
+# de estado que aparezca mal dueno, por ejemplo despues de restaurar un backup.
 #
-# Uso, desde la raiz del repo:
+# Ya no cubre `opencode/`, `git/` ni `go/`: esas carpetas del host no son
+# montajes en el layout de un solo contenedor. Se mantienen `workspace/` y
+# `backups/` (binds) mas los dos volumenes nombrados.
+#
+# Uso, solo para reparar, desde la raiz del repo:
 #   pwsh -File scripts/fix-permissions.ps1
 #
-# Cualquier valor >= 1 es valido: si mas adelante cambias el uid, cambia la
-# constante de abajo y la linea `user:` de compose.yml en el mismo commit.
+# Cualquier valor >= 1 es valido: el uid debe coincidir con el usuario `hermes`
+# de la imagen (10000 por defecto), que es quien escribe el estado.
 
 $ErrorActionPreference = 'Stop'
 $TargetUid = '10000'
-$Subdirs   = @('opencode', 'go', 'backups', 'git', 'workspace')
+$Subdirs   = @('backups', 'workspace')
 $Volumes   = @('robotina_engram_db', 'robotina_opencode_db')
 
 # HOST_DATA_DIR sale del .env, que es la unica fuente de verdad de la ruta.
@@ -38,5 +41,5 @@ foreach ($vol in $Volumes) {
 }
 
 Write-Host "`nVerificacion, como lo ve un contenedor:"
-docker run --rm -v "${data}:/d" alpine ls -ld /d/opencode /d/go /d/backups /d/git /d/workspace
-Write-Host "`nListo. Despues de esto, en compose.yml: user: `"$TargetUid`:$TargetUid`" para opencode."
+docker run --rm -v "${data}:/d" alpine ls -ld /d/backups /d/workspace
+Write-Host "`nListo. Reparacion terminada."
