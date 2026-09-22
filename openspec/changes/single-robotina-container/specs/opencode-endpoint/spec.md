@@ -165,9 +165,10 @@ The OpenCode server SHALL be ready before Hermes' first delegation can reach it.
 - THEN no `Connection refused`/`ECONNREFUSED` entry for `127.0.0.1:4096` is present
 - PROOF: `docker compose logs --since 10m robotina 2>&1 | grep -Ei '127\.0\.0\.1:4096.*(refused|econnrefused)'`
   (no output, exit non-zero)
-- OPEN ITEM: the mechanism that provides readiness (`s6-notifyoncheck` against
-  `GET /global/health`, `notification-fd`, or a bounded wait in `opencode-init`) is proposal
-  §14 Q2, owned by `sdd-design`. This requirement constrains the outcome only.
+- CLOSED BY DESIGN §9.1: a dedicated `opencode-ready` oneshot that polls `GET /global/health`
+  with a bounded credential-aware retry (120 s), ordered after the `opencode` longrun by
+  `dependencies.d/opencode`; it is the mechanism that provides readiness. This requirement
+  constrains the outcome only.
 
 ### Requirement: EP5 — The server process runs as uid 10000
 
@@ -196,8 +197,9 @@ root.
 After the merge, `OPENCODE_SERVER_PASSWORD` SHALL be documented as defense-in-depth only,
 because no network peer can reach the port. The documentation SHALL NOT retain the retired
 rationale ("a peer on the `agents` network could drive the server without a password").
-Whether the variable is kept or removed SHALL NOT be decided here (proposal §14 Q5, owned by
-`sdd-spec`/`sdd-design`); the requirement constrains the documented semantics either way.
+Whether the variable is kept or removed SHALL NOT be decided here (Q5 — CLOSED BY DESIGN §10.3:
+kept, re-documented as defense-in-depth only); the requirement constrains the documented
+semantics either way.
 
 #### Scenario: The password is still documented where it is used
 

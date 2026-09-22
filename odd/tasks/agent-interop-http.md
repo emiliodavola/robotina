@@ -1,5 +1,12 @@
 # Feature: agent-interop-http
 
+> **Superseded (2026-09-22)** — this feature's design is superseded by the
+> `single-robotina-container` change (R6). `opencode serve` no longer lives in its own container
+> reached over the `agents` network; it runs on loopback inside the single `robotina` container,
+> and the network hop described below is retired. The history below is preserved unchanged as the
+> record of how the HTTP interop was built and what it proved; it is not the current topology.
+> See `odd/tasks/single-robotina-container.md` for the merged reality.
+
 ## Goal
 
 Make Hermes able to dispatch coding work to OpenCode, keeping the two agents in
