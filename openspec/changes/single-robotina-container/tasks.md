@@ -502,7 +502,7 @@ inferred.
 
 ## Phase 6 — Migration helper and documentation
 
-- [ ] 29. Author `scripts/migrate-state.ps1`: per-path copy-forward **only when the
+- [x] 29. Author `scripts/migrate-state.ps1`: per-path copy-forward **only when the
   destination is absent**, `node_modules/` skipped inside the legacy opencode folder,
   `package-lock.json` copied, no delete/move primitive anywhere, a copied/skipped summary, and
   a closing assertion that the three legacy folders still exist and the two copied-from
@@ -516,7 +516,7 @@ inferred.
     (all three exist) and `ls -A "$HOST_DATA_DIR/opencode" "$HOST_DATA_DIR/git"` (non-empty);
     `ls -d "$HOST_DATA_DIR/hermes/go"` (must fail — the Go cache is not copied).
 
-- [ ] 30. Update `scripts/export-state.sh`: header comment and the invocation prefix for the
+- [x] 30. Update `scripts/export-state.sh`: header comment and the invocation prefix for the
   merged container name, keeping the existing loopback endpoint and the
   `OPENCODE_SERVER_PASSWORD` auth path. Spanish comments. Files: `scripts/export-state.sh`.
   Depends on: task 4.
@@ -524,7 +524,7 @@ inferred.
     `grep -rn "docker compose exec opencode" README.md README.en.md SECURITY.md scripts/ hermes/`
     (no output).
 
-- [ ] 31. `scripts/fix-permissions.ps1` — **undecided item, interim safe default only.**
+- [x] 31. `scripts/fix-permissions.ps1` — **undecided item, interim safe default only.**
   Keep the file and rewrite its header to say it is **superseded by the container-side
   cont-init step and no longer part of setup**; drop `opencode` / `git` / `go` from its target
   list (they are no longer mounts) and keep `workspace` / `backups` plus the two volumes as a
@@ -536,7 +536,7 @@ inferred.
     `grep -rniE "fix-permissions" README.md README.en.md SECURITY.md` returns only
     explanatory text, never a numbered setup step (human reading of the hits).
 
-- [ ] 32. Update `.env.example`: document both key names with no values, note the routing of
+- [x] 32. Update `.env.example`: document both key names with no values, note the routing of
   the two keys into the merged container, and refresh the `docker inspect` comment to name the
   narrow `--format` rule. Files: `.env.example`. Depends on: task 4.
   - Verify: `git grep -n "HERMES_OPENCODE_GO_API_KEY\|OPENCODE_GO_API_KEY" -- .env.example compose.yml`
