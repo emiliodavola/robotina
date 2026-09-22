@@ -139,13 +139,24 @@ Frozen by the user after the explore phase:
   container stream, migration via a host-side helper, nesting proof with escalation path.
 
 ## Delivery plan (decided at sdd-tasks)
-
 - Strategy: **chained PRs**; chain strategy: **`feature-branch-chain`**.
 - Tracker branch: `feat/single-robotina-container` (this branch). Only the tracker merges to `main`.
 - Slice branches are cut from the tracker; PR #1 targets the tracker, each child PR targets the
   immediate previous slice branch. Merge bottom-up; retarget each child once its parent lands.
 - PR #1 is the **process artifacts** (`openspec/**` + `odd/tasks/single-robotina-container.md`),
   kept separate from the implementation review.
+- **Review budget policy (user decision, 2026-09-22): `size:exception` accepted per slice**, up to
+  roughly 650 authored lines per slice, instead of splitting further. Slices over 400 are
+  documented with their measured count rather than re-sliced.
+
+## Slice progress
+
+| Slice | Branch | Commit | Authored lines | Status |
+| --- | --- | --- | --- | --- |
+| S0 artifacts | `feat/single-robotina-container-01-artifacts` | `3a420ab` | 5,005 | committed |
+| S1 compose | `feat/single-robotina-container-02-compose` | `53dc10e` | 449 (646 with the process record) | committed |
+| S2 image | `feat/single-robotina-container-03-image` | — | — | in progress |
+| S4 supervision | pending | — | — | pending |
 
 | PR | Slice | Contents | Est. lines |
 | --- | --- | --- | --- |
@@ -176,6 +187,12 @@ Forecast recorded by `sdd-tasks`: process artifacts 4,734 lines; implementation 
 - **Q7 — `scripts/fix-permissions.ps1`**: the user cancelled the choice. Not decided, not
   invented. Interim safe default from design §8.4: keep the file with a "superseded" header
   and drop it from the setup instructions. Revisit before `sdd-apply` closes.
+- **F1 (found in slice 02)**: task 45's secret-leak grep is unsatisfiable as written — the
+  repository already has 28 benign matches from documentation placeholders and shell variable
+  references. Needs a value-shaped refinement before that task can pass.
+- **Environment incident (repaired)**: `sdd-apply` was hard-blocked with
+  `package-local-binary-missing` because `<package>/.gentle-ai/v3.5.0/gentle-ai.exe` was absent.
+  Repaired by `node scripts/install-gentle-ai.mjs` in the gentle-pi package root.
 - Stale `OPEN ITEM` annotations in the specs still describe Q1/Q2/Q3/Q5/Q7/Q10/Q12 as open;
   `sdd-design` closed them. Needs an alignment task in the apply set.
 - Review workload: the SDD artifacts alone are ~3.9k authored lines. Delivery strategy

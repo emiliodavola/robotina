@@ -177,7 +177,7 @@ inferred.
 
 ## Phase 2 — Image build context
 
-- [ ] 5. Author `robotina/Dockerfile`: vendor Debian base, the four new version pins
+- [x] 5. Author `robotina/Dockerfile`: vendor Debian base, the four new version pins
   (`OPENCODE_VERSION`, `GH_VERSION`, `TAPLO_VERSION`), `SHELL ["/bin/bash", "-o", "pipefail",
   "-c"]`, the twelve ordered layers of design §2.1, the explicit drop list of §2.2, the add
   list with pins of §2.3, the glibc-opencode assertion block and the tool-inventory assertion
@@ -187,12 +187,12 @@ inferred.
   - Verify: `docker compose build robotina` (exit 0 — the assertion block must fail the build
     loudly on a wrong asset).
 
-- [ ] 6. Move `opencode/overlay.json` to `robotina/overlay.json`, content unchanged.
+- [x] 6. Move `opencode/overlay.json` to `robotina/overlay.json`, content unchanged.
   Files: `robotina/overlay.json`, `opencode/overlay.json`. Depends on: task 5.
   - Verify: `git status --porcelain -- robotina/overlay.json opencode/overlay.json` shows the
     rename; `docker compose build robotina` (exit 0).
 
-- [ ] 7. Author `robotina/opencode-init.sh` (the oneshot, runs as uid 10000): staged
+- [x] 7. Author `robotina/opencode-init.sh` (the oneshot, runs as uid 10000): staged
   gentle-ai tree authoritative except `node_modules` / `package-lock.json`, non-destructive
   per-key `overlay.json` merge with `permission` replaced wholesale, invalid JSON quarantined
   to `opencode.json.invalid-<timestamp>` (never fatal), atomic write inside the config
@@ -201,7 +201,7 @@ inferred.
   - Verify: `docker compose build robotina` (exit 0, the build runs a syntax check on the
     script); the behavioural proof is task 27.
 
-- [ ] 8. Author `robotina/healthcheck.sh`: loopback health probe that is credential-aware
+- [x] 8. Author `robotina/healthcheck.sh`: loopback health probe that is credential-aware
   (`-u "opencode:$OPENCODE_SERVER_PASSWORD"` only when the variable is non-empty) plus an
   `engram serve` existence check using a character-class pattern. The file is image-shipped so
   no secret-shaped string appears in `docker inspect` output. Spanish comments.
@@ -210,7 +210,7 @@ inferred.
     `docker inspect --format '{{.Config.Healthcheck.Test}}' robotina` (after task 18, shows the
     image path, no interpolated secret).
 
-- [ ] 9. Remove the superseded build context: `git rm -r opencode/` (its logic is fully ported
+- [x] 9. Remove the superseded build context: `git rm -r opencode/` (its logic is fully ported
   into `robotina/`). Files: `opencode/Dockerfile`, `opencode/entrypoint.sh`,
   `opencode/overlay.json`. Depends on: tasks 5, 6, 7.
   - Verify: `git ls-files opencode/` (no output); `docker compose config -q` (exit 0).
