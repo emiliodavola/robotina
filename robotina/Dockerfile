@@ -259,16 +259,25 @@ RUN set -eux; \
 # comando, sin shebang, sin `set` inicial, con programa de ruta absoluta que
 # exista en la imagen, y guarda la logica de shell en un script propio de la
 # imagen (`opencode-ready.sh`).
+#
+# `bin/opencode` es el wrapper del CLI: `opencode` no tiene almacen de
+# credenciales y lee la clave del entorno, asi que un CLI lanzado desde el
+# agente se autenticaria con la clave de Hermes. El wrapper reexporta
+# OPENCODE_GO_API_KEY desde ROBOTINA_OPENCODE_GO_API_KEY (ver el comentario del
+# propio script); se instala junto al resto de los archivos de /opt/robotina y
+# se valida con `sh -n` en el mismo bloque.
 COPY . /opt/robotina-src/
 RUN set -eux; \
-    install -d /opt/robotina; \
+    install -d /opt/robotina /opt/robotina/bin; \
     install -m 0644 /opt/robotina-src/overlay.json /opt/robotina/overlay.json; \
     install -m 0755 /opt/robotina-src/opencode-init.sh /opt/robotina/opencode-init.sh; \
     install -m 0755 /opt/robotina-src/opencode-ready.sh /opt/robotina/opencode-ready.sh; \
     install -m 0755 /opt/robotina-src/healthcheck.sh /opt/robotina/healthcheck.sh; \
+    install -m 0755 /opt/robotina-src/bin/opencode /opt/robotina/bin/opencode; \
     sh -n /opt/robotina/opencode-init.sh; \
     sh -n /opt/robotina/opencode-ready.sh; \
     sh -n /opt/robotina/healthcheck.sh; \
+    sh -n /opt/robotina/bin/opencode; \
     test -d /opt/robotina-src/s6/cont-init.d; \
     for f in /opt/robotina-src/s6/cont-init.d/*; do \
       [ -f "$f" ] || continue; \
@@ -320,6 +329,14 @@ RUN set -eux; \
       echo "robotina: servicio $n ($t) validado"; \
     done; \
     echo "robotina: arbol s6 propio instalado y validado"
+
+# PATH se PREPENDEA con /opt/robotina/bin para que el wrapper `opencode` gane
+# sobre /usr/local/bin/opencode (el binario real) y sobre /opt/data/.local/bin,
+# que precede al binario real en el PATH de la base y ademas es ESCRIBIBLE por
+# el agente. /opt/robotina es root-owned: el agente no puede reescribir el
+# wrapper ni su directorio. El append de /opt/uv/bin de mas arriba queda
+# intacto (el venv de Hermes conserva prioridad); aca solo se antepone.
+ENV PATH=/opt/robotina/bin:$PATH
 
 # --- 12. aserciones finales ---------------------------------------------------
 # La suite de verificacion del cambio (39 requisitos) asume TODO este

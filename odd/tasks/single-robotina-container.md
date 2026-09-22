@@ -1114,3 +1114,77 @@ docker compose logs robotina | grep -F "[Telegram] Connected to Telegram"   # pr
 ```
 
 No commit, push, or PR was performed.
+
+## Follow-up (post-merge) — retire the repo-local OpenCode skill and give the CLI its own key
+
+**This section is a later record, not part of the merged change above.** The historical file list
+earlier in this document (`hermes/skills/opencode-server/SKILL.md`, under "Review Workload
+Forecast") is kept **verbatim**: it was accurate when written. The skill was deleted afterwards,
+as recorded here.
+
+### Duplication found
+
+Once the merge landed, the agent had **two** enabled OpenCode skills: the vendor's **builtin**
+`opencode` skill (which assumes a local CLI — and after the merge the CLI genuinely is local at
+`/usr/local/bin/opencode`, `1.18.32`) and our repo-local `opencode-server` skill (which documented
+reaching the loopback HTTP server). The user asked to remove ours because it duplicated the
+builtin. The vendored builtin `opencode` skill is the remaining, correct path for CLI knowledge.
+
+### Credential-store finding (why deletion alone was not enough)
+
+`opencode` has **no credential store**: there is no `auth.json` under
+`/opt/data/.local/share/opencode` (verified by `ls`; the directory holds only `opencode.db`,
+`log/` and `repos/`). It reads its key from the **environment**. In the agent's shell,
+`OPENCODE_GO_API_KEY` carries **Hermes'** key, because the container-level variable must hold the
+Hermes value for the vendor entrypoint; the OpenCode key travels in
+`ROBOTINA_OPENCODE_GO_API_KEY` and was exported only inside the `opencode` service's run script.
+Consequence: a local `opencode` CLI invoked by the agent would authenticate with **Hermes'** key,
+breaking the "each agent configured with only its own key" property (spec CR1). A naive deletion
+of the skill would have regressed that requirement silently.
+
+### Fix
+
+- Deleted `hermes/skills/opencode-server/SKILL.md` and the now-empty directory.
+- Added `robotina/bin/opencode`, installed at `/opt/robotina/bin/opencode` (mode `0755`): a POSIX
+  `sh` script that exports `OPENCODE_GO_API_KEY` from `ROBOTINA_OPENCODE_GO_API_KEY` when that is
+  set, then `exec /usr/local/bin/opencode "$@"` by absolute path. It prints nothing on the happy
+  path, never echoes a credential, and when `ROBOTINA_OPENCODE_GO_API_KEY` is unset it execs the
+  real binary unchanged (pass-through), degrading instead of breaking.
+- `robotina/Dockerfile`: installs the wrapper alongside the other `/opt/robotina` files, adds
+  `sh -n` validation for it in the same block, and **prepends** `/opt/robotina/bin` to `PATH` so
+  the wrapper wins over `/usr/local/bin/opencode` **and** over the agent-writable
+  `/opt/data/.local/bin` that precedes the real binary in the base image. `/opt/robotina` is
+  root-owned, strictly better than the writable `/opt/data/.local/bin`. The earlier
+  `ENV PATH=$PATH:/opt/uv/bin` **append** is left intact (the Hermes venv keeps priority).
+- Reference fixes: `hermes/context/.hermes.md`, `hermes/skills/github-private-repos/SKILL.md`,
+  `openspec/project.md`, `README.md`, `README.en.md`, `SECURITY.md` and
+  `openspec/specs/agent-credentials/spec.md` (new **CR8** requirement + `CLI-KEY-PROBE` recipe).
+  `odd/tasks/agent-interop-http.md` was **not** touched: it is a historical record and stays
+  verbatim.
+
+### Measured verification
+
+- `docker compose build robotina` → exit `0`; build assertions green (the `opencode --version`
+  assertion now runs **through** the wrapper, exercising the pass-through branch at build time
+  because `ROBOTINA_OPENCODE_GO_API_KEY` is not set in the build).
+- `docker compose up -d --force-recreate robotina` → recreated; `docker compose ps` → exactly
+  `robotina` + `egress-proxy`, both `healthy`.
+- `command -v opencode` → `/opt/robotina/bin/opencode`.
+- `opencode --version` → `1.18.32` (wrapper emits no extra output).
+- `hermes skills list | grep -i opencode` → only `opencode | autonomous-ai-agents | builtin |
+  builtin | enabled` remains.
+- Loopback health: plain probe `401` (password set), credential-aware probe `200`;
+  `s6-svstat /run/service/opencode` → `up`. The server survived the `PATH` change.
+- Wrapper unit proof (`CLI-KEY-PROBE`, hashes only, no value printed): `via-wrapper:` ==
+  `opencode-input:` and != `hermes-input:`; `passthrough:` == `hermes-input:`.
+- End-to-end: `opencode run --model opencode/big-pickle "Reply with exactly the single word:
+  pong"` as uid `hermes` → answered `pong`, exit `0` (the key is accepted through the wrapper).
+  (An earlier attempt with the stale model id `opencode/mimo-v2.5-free` failed with a server error;
+  `opencode models` lists `opencode/mimo-v2.6-flash-free` and friends now.)
+- `grep -rn "opencode-server" --include="*.md" . | grep -v openspec/changes/archive/` → only the
+  two historical ODD mentions (this file's frozen file list and `agent-interop-http.md`).
+
+**Host observation (not part of this change):** the local `.env` on this host uses
+`ROBOTINA_*`-prefixed names while `compose.yml` (and `.env.example`) still expect
+`HERMES_OPENCODE_GO_API_KEY` / `OPENCODE_GO_API_KEY`; the stack validates and runs because those
+are exported in the shell. `compose.yml` and `.env.example` were out of scope and were not touched.

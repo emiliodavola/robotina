@@ -50,6 +50,21 @@ grep -m1 "^HERMES_OPENCODE_GO_API_KEY=" .env | tr -d "\r" | sed "s/^HERMES_//" |
 grep -m1 "^OPENCODE_GO_API_KEY="        .env | tr -d "\r" | sha256sum                        # must equal the opencode hash
 ```
 
+`CLI-KEY-PROBE` (in-container; prints only sha256 hashes; rewrites the wrapper's `exec` target to a stub so the real CLI is never launched and no model call is made, and clears `ROBOTINA_OPENCODE_GO_API_KEY` for the last line only):
+
+```sh
+docker compose exec -T robotina sh -c '
+  stub=/tmp/cli-key-stub; wrap=/tmp/cli-key-wrap
+  printf "%s\n" "#!/bin/sh" "printf %s \"\$OPENCODE_GO_API_KEY\" | sha256sum" > "$stub"
+  chmod 0755 "$stub"
+  sed "s#^exec /usr/local/bin/opencode#exec $stub#" /opt/robotina/bin/opencode > "$wrap"
+  chmod 0755 "$wrap"
+  echo "via-wrapper:    $("$wrap")"
+  echo "opencode-input: $(printf %s "$ROBOTINA_OPENCODE_GO_API_KEY" | sha256sum)"
+  echo "hermes-input:   $(printf %s "$OPENCODE_GO_API_KEY" | sha256sum)"
+  echo "passthrough:    $(env -u ROBOTINA_OPENCODE_GO_API_KEY "$wrap")"'
+```
+
 ## Requirements
 
 ### Requirement: CR1 — Two independent API-key inputs
@@ -242,3 +257,42 @@ The user SHALL have confirmed understanding of the accepted credential regressio
   with the kept PAT and (b) the two keys are not isolated from each other at equal uid
 - PROOF: human check (no shell command). The shell-verifiable prerequisites are CR5's
   `grep -niE "GITHUB_TOKEN" SECURITY.md` and CR6's non-enforceability grep.
+
+### Requirement: CR8 — A locally invoked `opencode` CLI resolves OpenCode's own key
+
+The `opencode` CLI invoked from the agent's shell SHALL authenticate with the **OpenCode** input
+(`ROBOTINA_OPENCODE_GO_API_KEY`), never with the Hermes input that the container-level
+`OPENCODE_GO_API_KEY` carries. The CLI has **no credential store** of its own, so the assignment
+SHALL be provided by the `PATH` wrapper `/opt/robotina/bin/opencode`, which re-exports
+`OPENCODE_GO_API_KEY` from `ROBOTINA_OPENCODE_GO_API_KEY` before executing the real binary. When
+`ROBOTINA_OPENCODE_GO_API_KEY` is unset the wrapper SHALL exec the real binary unchanged
+(pass-through) rather than fail, and it SHALL print no credential value at any time.
+
+#### Scenario: The wrapper hands the CLI the OpenCode key
+
+- GIVEN the stack is up with distinct values for both inputs and the wrapper is installed at
+  `/opt/robotina/bin/opencode`
+- WHEN the wrapper is run against a stub that hashes `OPENCODE_GO_API_KEY`, with
+  `ROBOTINA_OPENCODE_GO_API_KEY` set
+- THEN the printed hash equals the hash of `ROBOTINA_OPENCODE_GO_API_KEY` and differs from the
+  hash of the container's `OPENCODE_GO_API_KEY`
+- PROOF: `CLI-KEY-PROBE` — the `via-wrapper:` line MUST equal the `opencode-input:` line and MUST
+  differ from the `hermes-input:` line
+
+#### Scenario: The wrapper degrades to a pass-through when its input is unset
+
+- GIVEN the wrapper is installed and `ROBOTINA_OPENCODE_GO_API_KEY` is not exported to it
+- WHEN the same stub is run without that variable
+- THEN the stub sees the untouched container value
+- PROOF: `CLI-KEY-PROBE` — the `passthrough:` line MUST equal the `hermes-input:` line
+
+#### Scenario: The wrapper wins on `PATH` and prints no credential
+
+- GIVEN the merged image
+- WHEN the CLI is resolved from `PATH` and run
+- THEN it resolves to the wrapper under the root-owned `/opt/robotina/bin` (ahead of
+  `/usr/local/bin/opencode` and of the agent-writable `/opt/data/.local/bin`), and neither the
+  resolution nor the wrapper emits a credential value
+- PROOF: `docker compose exec -T robotina sh -c 'command -v opencode'` (prints
+  `/opt/robotina/bin/opencode`) and `docker compose exec -T robotina sh -c 'opencode --version'`
+  (prints the version only: no key, no extra wrapper output).
