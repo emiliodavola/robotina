@@ -28,6 +28,84 @@ entries.
   Spanish; `README.md` and `SECURITY.md` Spanish; `README.en.md` and `odd/tasks/*.md` English.
   `README.md` and `README.en.md` change in the same commit.
 
+## Slice 05 — runtime defect fix and re-verification (apply)
+
+Branch: `feat/single-robotina-container-04-supervision` (slice 04, still checked out). The first
+real `up` with live keys exposed **two real defects in slice 04**. Both were fixed, the image was
+rebuilt, and the stack was re-verified at runtime. **Tasks 10 and 12 are reopened here with their
+reason, re-fixed, re-verified and re-closed**; tasks 17–20 and 23–25 are closed by the runtime
+evidence below (checkboxes flipped in this file).
+
+### Defect D1 — the s6 oneshot `up` files were not execline (reopens task 12)
+
+- **Evidence (observed):** the container log showed
+  `s6-rc-oneshot-run: fatal: unable to exec set: No such file or directory` and
+  `s6-rc: warning: unable to start service opencode-init: command exited 127`. `opencode` and
+  `engram` both depend on `opencode-init`, so neither started.
+- **Root cause (proven):** s6-rc executes a oneshot's `up` **as an execline script**, not a shell
+  script. Reproduced inside the container:
+  `/package/admin/execline/command/execlineb /etc/s6-overlay/s6-rc.d/opencode-init/up` →
+  `execlineb: fatal: unable to exec set`. The `#` lines are execline comments, so the first
+  non-comment token (`set`, from `set -eu`) was treated as the program to exec. The vendor's own
+  oneshots agree: every `/package/admin/s6-overlay/etc/s6-rc/sources/*/up` is a single line — an
+  absolute path to an executable.
+- **Fix:** both `up` files are now one-line execline invocations. `opencode-init/up` =
+  `/command/with-contenv /usr/bin/env HOME=/opt/data /command/s6-setuidgid hermes /opt/robotina/opencode-init.sh`;
+  `opencode-ready/up` = `/command/with-contenv /opt/robotina/opencode-ready.sh`. The bounded
+  credential-aware poll moved into the image script `robotina/opencode-ready.sh`.
+  `robotina/opencode-init.sh` now sets `HOME=/opt/data` itself (no inherited-HOME dependency).
+- **Build-time assertion added (`robotina/Dockerfile`):** every oneshot `up` must be exactly one
+  command line, no shebang, not starting with `set`, starting with an absolute path that exists
+  and is executable. It fired green on the rebuilt image (`servicio opencode-init (oneshot)
+  validado`, `… opencode-ready (oneshot) validado`).
+- **Re-verification (observed after rebuild):** `s6-rc -a list` lists `opencode-init`,
+  `opencode-ready`, `opencode`, `engram`; `s6-svstat /run/service/opencode` → `up`; log shows
+  `service opencode-init successfully started` → `engram` → `opencode` → `opencode-ready
+  successfully started`, with `robotina: opencode listo (intentos=1)`.
+
+### Defect D2 — the ownership self-heal was too shallow (reopens task 10)
+
+- **Evidence (measured in the running container before the fix):** `root:root /opt/data/.config`,
+  `root:root /opt/data/.local`, `root:root /opt/data/.local/share`, and
+  `/opt/data/.local/state` **absent**; Hermes logged `[Telegram] Failed to connect to Telegram:
+  [Errno 13] Permission denied: '/opt/data/.local/state'`, `Host gateway lock could not be opened
+  (Permission denied: '/opt/data/.local/state')`, and `telegram failed to connect`.
+- **Root cause:** step 2 guarded the repair with `s6-setuidgid hermes test -w /opt/data`, which
+  succeeds because `/opt/data` is `hermes:hermes 0700`, so the repair was skipped while the nested
+  root-owned directories stayed root-owned; `install -d` only fixed the leaf it created.
+- **Fix:** `robotina/s6/cont-init.d/10-robotina-state` now (1) `install -d -o/-g` on the
+  intermediate parents too (`.config`, `.local`, `.local/share`, plus a created `.local/state` and
+  `.cache`) — measured that `install -d` re-applies the owner to pre-existing directories — and
+  (2) tests a list of directories the app actually writes to (not just `/opt/data`) before running
+  the bounded `find -prune` re-own. The read-only-mount prune list is unchanged (no new mounts
+  under `/opt/data`).
+- **Re-verification (observed after rebuild):** `/opt/data/.config`, `.local`, `.local/share`,
+  `.local/state`, `.cache` all `hermes:hermes`;
+  `stat -c %u:%g /opt/data/.local/state` → `10000:10000`; container log `grep -cE "Permission
+  denied: '/opt/data/.local/state'|telegram failed to connect"` → `0`; log shows
+  `[Telegram] Connected to Telegram (polling mode)`.
+
+### Runtime measurements (tasks 17–20, 23–25)
+
+| Task | Measurement | Observed result |
+| --- | --- | --- |
+| 17 | `docker compose build robotina` + `command -v` for the 20 tools | build exit 0; all 20 resolve |
+| 18 | `docker compose ps`; PID 1; `/proc/1/status`; `s6-rc -a list`; ports | exactly `robotina`, `egress-proxy`; PID 1 = `s6-svscan … /run/service` (no `tini`/`docker-init`); Uid/Gid 0; 10 services; no host mapping |
+| 19 | credential-aware probe; probe without `-u`; host curl; `ss -ltn` | with `-u` exit 0; without `-u` **401** (`no_auth_probe_exit=22`) → endpoint **is** auth-protected; host curl exit 7; only `127.0.0.1:4096`, no wildcard |
+| 20 | peer probes + network membership | control `egress-proxy:3128` = 400; `robotina:4096` connection refused (exit 7); `egress-proxy` `/dev/tcp` refused; `agents`={egress-proxy,robotina}, `egress`={egress-proxy} |
+| 23 | process key hashes; vendor-patch grep; log secret grep; `GITHUB_TOKEN` | opencode `286c7a04…`, hermes `06c38c58…` → **differ**; both match the exported shell env; vendor-patch grep empty; log secret grep empty; `GITHUB_TOKEN` present |
+| 24 | nested mounts; negative control; durability; volume names | 2 `ext4` mounts (not 9p/virtiofs); marker in the volume **absent** from the host bind; marker survived `down`/`up`; 2 volumes |
+| 25 | `CapEff`/`CapBnd`/`NoNewPrivs` of the uid-10000 `opencode serve` | `CapInh/Prm/Eff/Amb = 0x0`, `CapBnd = 0x00000000000000cb`, `NoNewPrivs: 1` — matches design §13 |
+
+**Deferred and reported, not closed:** task 21 (3× recreation loop + gate-failure observation),
+task 22 (identity layers — tasks 13–16 not implemented), task 26 (peak `pids.current` under the
+concurrent worst case; at-rest = 54, `pids.max` = 1024), task 38 (needs the task-26 peak), and
+tasks 27–28. Two findings need the parent: the endpoint's auth-protection requires the EP1/EP4 NOTE
+in `specs/opencode-endpoint/spec.md` to record the observation, but `specs/` is outside this
+session's allowed edit surfaces; and the in-container `robotina:4096` negative-control probe is
+confounded by the container's proxy environment (Squid answers with a deny page, exit 0), so the
+unconfounded proof is the peer-container probe.
+
 ## Review Workload Forecast
 
 | Field | Value |
@@ -217,7 +295,7 @@ inferred.
 
 ## Phase 3 — s6 supervision tree
 
-- [ ] 10. Author `robotina/s6/cont-init.d/10-robotina-state` (runs as root, after the vendor
+- [x] 10. Author `robotina/s6/cont-init.d/10-robotina-state` (runs as root, after the vendor
   `01-hermes-setup`): `install -d -o 10000 -g 10000` for the state directories, the
   self-heal `chown -R` on `/opt/data` only when the app uid cannot write it, an explicit
   bounded `chown -R` on the two nested volume roots, and uid derivation from `id -u hermes`.
@@ -226,7 +304,7 @@ inferred.
   - Verify: `docker compose build robotina` (exit 0); the behavioural proof is task 22's SL6
     write test.
 
-- [ ] 11. Author the `opencode` and `engram` longruns: `type`, `run` (both
+- [x] 11. Author the `opencode` and `engram` longruns: `type`, `run` (both
   `#!/command/with-contenv`, `HOME=/opt/data`, `XDG_*` scoped to the opencode process, the key
   rewritten into the vendor name and the robotina-named copy unset, `cd /workspace`,
   `exec s6-setuidgid hermes …`, no secret in any banner), `dependencies.d/*` per design §5.1,
@@ -236,7 +314,7 @@ inferred.
   - Verify: `docker compose build robotina` (exit 0 — the build asserts `type`, script
     presence, executability, `sh -n` and the dependency files).
 
-- [ ] 12. Author the `opencode-init` and `opencode-ready` oneshots (`opencode-ready` polls the
+- [x] 12. Author the `opencode-init` and `opencode-ready` oneshots (`opencode-ready` polls the
   credential-aware loopback health endpoint with the 120 s bound) and register all four names
   under `robotina/s6/s6-rc.d/user2/contents.d/`. Spanish comments.
   Files: `robotina/s6/s6-rc.d/{opencode-init,opencode-ready}/**`,
@@ -288,13 +366,13 @@ inferred.
 
 ## Phase 5 — First build, first `up`, and the measurements
 
-- [ ] 17. Build the merged image and confirm the tool inventory the verification suite assumes.
+- [x] 17. Build the merged image and confirm the tool inventory the verification suite assumes.
   Files: none. Depends on: tasks 9, 12.
   - Verify: `docker compose build robotina` (exit 0);
     `docker compose exec robotina sh -c 'command -v gh jq rg go opencode taplo marksman codegraph engram gentle-ai uv node npm python3 R pgrep pkill ss curl git'`
     (every path printed).
 
-- [ ] 18. Bring the stack up for the first time and confirm the container shape: exactly one
+- [x] 18. Bring the stack up for the first time and confirm the container shape: exactly one
   agent container plus the proxy, PID 1 is the vendor entrypoint chain, the s6 database is
   live, nothing is published. Files: none. Depends on: task 17.
   - Verify: `docker compose up -d && docker compose ps` (exactly `robotina` and
@@ -303,7 +381,7 @@ inferred.
     (both `0`); `docker compose exec robotina s6-rc -a list` (non-empty);
     `docker compose ps --format 'table {{.Name}}\t{{.Ports}}'` (no host mapping).
 
-- [ ] 19. Verify the loopback-only endpoint from inside the container and the host, and record
+- [x] 19. Verify the loopback-only endpoint from inside the container and the host, and record
   once whether the health endpoint is auth-protected (design §19.4 apply obligation).
   Files: `odd/tasks/single-robotina-container.md`. Depends on: task 18.
   - Verify: `docker compose exec robotina sh -c 'set --; [ -n "${OPENCODE_SERVER_PASSWORD:-}" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"; curl -fsS "$@" -m 5 http://127.0.0.1:4096/global/health'`
@@ -315,7 +393,7 @@ inferred.
     If the endpoint turns out to be auth-protected, amend EP1/EP4's recipes in
     `specs/opencode-endpoint/spec.md` in the same commit.
 
-- [ ] 20. Verify the endpoint is unreachable from every network peer and that network
+- [x] 20. Verify the endpoint is unreachable from every network peer and that network
   membership is `agents` only. Files: none. Depends on: task 18.
   - Verify: `docker run --rm --network agents curlimages/curl -m 5 -sS -o /dev/null -w 'control=%{http_code}\n' http://egress-proxy:3128`
     (numeric control code); `docker run --rm --network agents curlimages/curl -m 5 -sS http://robotina:4096/global/health`
@@ -347,7 +425,7 @@ inferred.
     `docker compose -p robotina-fresh config -q` then `docker compose -p robotina-fresh up -d robotina`
     then the write test and the skin grep against `robotina-fresh`.
 
-- [ ] 23. Verify per-process key configuration and secret hygiene (CR1–CR4): run `KEY-PROBE`
+- [x] 23. Verify per-process key configuration and secret hygiene (CR1–CR4): run `KEY-PROBE`
   and `KEY-REFERENCE` and confirm the two hashes are equal to their `.env` references and
   differ from each other, confirm no vendor file under `/opt/hermes` is patched, and confirm no
   secret reaches a tracked file or the log stream. Files: none. Depends on: task 18.
@@ -363,7 +441,7 @@ inferred.
     `git grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=.+' -- ':!*.example'`
     (no output).
 
-- [ ] 24. **[measurement-dependent]** Prove the nested volume-inside-bind layout positively
+- [x] 24. **[measurement-dependent]** Prove the nested volume-inside-bind layout positively
   and with a negative control (design §7.3, SL2/SL3), and record the raw output.
   Files: `odd/tasks/single-robotina-container.md`. Depends on: task 18.
   - Verify: `docker compose exec robotina sh -c 'mount | grep -E "\.engram|\.local/share/opencode"'`
@@ -383,7 +461,7 @@ inferred.
     `docker compose exec robotina sh -c 'find /opt/data/.engram /opt/data/.local/share/opencode -maxdepth 2 -name "*.db" | sort'`
     (non-empty).
 
-- [ ] 25. **[measurement-dependent]** Measure the uid-10000 opencode process's capability masks
+- [x] 25. **[measurement-dependent]** Measure the uid-10000 opencode process's capability masks
   and `NoNewPrivs` (design §13, Q4) and record the values verbatim.
   Files: `odd/tasks/single-robotina-container.md`. Depends on: task 18.
   - Verify: `docker compose exec robotina sh -c 'for p in $(pgrep -f "[o]pencode serve"); do echo "pid=$p uid=$(awk "/^Uid/{print \$2}" /proc/$p/status)"; grep -E "Cap(Inh|Prm|Eff|Bnd|Amb)|NoNewPrivs" /proc/$p/status; done'`

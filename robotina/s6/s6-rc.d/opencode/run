@@ -1,0 +1,35 @@
+#!/command/with-contenv sh
+# Servicio longrun `opencode`: el servidor HTTP local del agente.
+#
+# `with-contenv` es obligatorio: sin ese shebang el entorno del contenedor
+# (proxy de egreso, TZ, GITHUB_TOKEN, las dos claves, OPENCODE_SERVER_PASSWORD)
+# no llega nunca al servicio.
+set -eu
+
+export HOME=/opt/data
+# XDG_* explicitos: el layout no debe depender de la resolucion por defecto
+# (no documentada) de opencode. Van acotados a este arbol de procesos, jamas al
+# contenedor entero, para no perturbar el entorno de Hermes.
+export XDG_CONFIG_HOME=/opt/data/.config XDG_DATA_HOME=/opt/data/.local/share
+export XDG_STATE_HOME=/opt/data/.local/state XDG_CACHE_HOME=/opt/data/.cache
+export GOPATH=/opt/data/go GIT_CONFIG_GLOBAL=/opt/data/.config/git/config
+export ENGRAM_DATA_DIR=/opt/data/.engram
+
+# La clave de OpenCode, con el nombre que espera la herramienta, SOLO para este
+# proceso. En compose viaja como ROBOTINA_OPENCODE_GO_API_KEY (nombre propio)
+# para no colisionar con la clave que Hermes ya tiene como OPENCODE_GO_API_KEY;
+# aca se reescribe al nombre del vendor y la copia con nombre propio se borra
+# del entorno del proceso. Nunca se parchea un archivo de /opt/hermes.
+[ -n "${ROBOTINA_OPENCODE_GO_API_KEY:-}" ] || { echo "robotina: falta ROBOTINA_OPENCODE_GO_API_KEY" >&2; exit 1; }
+export OPENCODE_GO_API_KEY="$ROBOTINA_OPENCODE_GO_API_KEY"
+unset ROBOTINA_OPENCODE_GO_API_KEY
+
+cd /workspace
+echo "robotina: opencode serve -> 127.0.0.1:4096 (uid $(id -u hermes))" >&2
+
+# El `finish` calcula el backoff comparando contra la marca de arranque; s6
+# reporta el codigo de salida, no el tiempo de vida, asi que esta marca es la
+# unica forma de resetear el contador tras una corrida sana.
+st=/tmp/robotina; mkdir -p "$st"; date +%s > "$st/opencode.start"
+
+exec s6-setuidgid hermes opencode serve --hostname 127.0.0.1 --port 4096

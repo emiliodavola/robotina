@@ -155,8 +155,31 @@ Frozen by the user after the explore phase:
 | --- | --- | --- | --- | --- |
 | S0 artifacts | `feat/single-robotina-container-01-artifacts` | `3a420ab` | 5,005 | committed |
 | S1 compose | `feat/single-robotina-container-02-compose` | `53dc10e` | 449 (646 with the process record) | committed |
-| S2 image | `feat/single-robotina-container-03-image` | — | — | in progress |
-| S4 supervision | pending | — | — | pending |
+| S2 image | `feat/single-robotina-container-03-image` | `68d3d30` | 658 | committed |
+| S4 supervision | `feat/single-robotina-container-04-supervision` | committed | 287 (520 with the process record) | committed; **slice-05 fixes appended** (two runtime defects) |
+| S5 identity | pending | — | — | pending |
+| S6 migration & scripts | pending | — | — | pending |
+| S7 docs | pending | — | — | pending |
+| S8 records | pending | — | — | pending |
+| S9 measurement evidence | pending | — | — | pending |
+
+Task progress: **19/45** implementation tasks complete (12 through slice 04; +7 in slice 05:
+tasks 17–20, 23–25, after the two slice-04 defects were fixed and the stack was re-verified live).
+
+Verified so far without a live stack: `docker compose config -q`, `--services`,
+`docker compose build robotina` (exit 0), `docker build --check`, `s6-rc-compile` +
+`s6-rc-db check` (exit 0), the backoff sequence, and the cont-init script against real
+read-only mounts.
+
+Gated on a live `.env` (needs reissued keys) and `docker compose up`: tasks 18, 22, 27 and the
+whole measurement phase — the nested volume-inside-bind proof, the readiness gate, the
+measured `CapEff`/`CapBnd`, and `pids.current` under load.
+
+**Status after slice 05 (stack live):** tasks 18, 19, 20, 24 and 25 are now measured and complete
+(see the slice-05 evidence section); the readiness gate succeeded in ≈4.85 s; capabilities match
+design §13. Still gated: task 21's 3× recreation loop + gate-failure observation, task 22 (identity
+not implemented), tasks 26/38 (peak `pids.current` under the concurrent worst case), and tasks
+27–28.
 
 | PR | Slice | Contents | Est. lines |
 | --- | --- | --- | --- |
@@ -193,6 +216,18 @@ Forecast recorded by `sdd-tasks`: process artifacts 4,734 lines; implementation 
 - **Environment incident (repaired)**: `sdd-apply` was hard-blocked with
   `package-local-binary-missing` because `<package>/.gentle-ai/v3.5.0/gentle-ai.exe` was absent.
   Repaired by `node scripts/install-gentle-ai.mjs` in the gentle-pi package root.
+- **Slice 03 findings**: marksman's musl asset cannot run on the glibc base (the glibc asset
+  plus libicu is required), and a negated `grep` under `set -e` is a silent no-op, so the
+  glibc-opencode assertion was rewritten as a same-inode check plus an `ldd` proof. Both are
+  design-statement corrections still to be folded into `design.md`.
+- **Slice 03 anomaly (resolved)**: an unexplained edit changed the `ENGRAM_VERSION` /
+  `GENTLE_AI_VERSION` pins mid-slice; the agent restored the design values and the build
+  verified green against them.
+- **Slice 04 finding (A1, recorded)**: `chown` has no `--one-file-system`, so the root-side
+  ownership pass prunes the read-only mounts under `/opt/data`. Adding a new mount there means
+  updating the prune list.
+- **Corrected**: the vendor base does NOT ship `/etc/gitconfig`; the merged image creates it in
+  its own Dockerfile layer. An earlier probe was mislabelled.
 - Stale `OPEN ITEM` annotations in the specs still describe Q1/Q2/Q3/Q5/Q7/Q10/Q12 as open;
   `sdd-design` closed them. Needs an alignment task in the apply set.
 - Review workload: the SDD artifacts alone are ~3.9k authored lines. Delivery strategy
@@ -361,6 +396,109 @@ all. **Finding for the parent:** the literal recipe assigned to task 2 (and repe
 45) cannot pass on this repository even before the change; it needs the value-shaped
 refinement, or a `:!*.md`-style path exclusion, in a later slice. This slice does not rewrite
 `tasks.md` recipes.
+
+## Slice 05 — runtime defect fix and re-verification (slice 04 branch)
+
+Branch: `feat/single-robotina-container-04-supervision`. The first live `up` (stack up, keys live)
+exposed **two real defects in slice 04**. Both are fixed, the image is rebuilt, and the stack is
+re-verified at runtime. Tasks 10 and 12 were reopened and re-closed; tasks 17–20 and 23–25 are now
+complete. **Task progress: 19/45.**
+
+### Defect D1 — the s6 oneshot `up` files were not execline (reopens task 12)
+
+```text
+# observed before the fix
+docker compose logs robotina
+robotina  | s6-rc-oneshot-run: fatal: unable to exec set: No such file or directory
+robotina  | s6-rc: warning: unable to start service opencode-init: command exited 127
+# proof of the root cause, inside the container
+$ /package/admin/execline/command/execlineb /etc/s6-overlay/s6-rc.d/opencode-init/up
+execlineb: fatal: unable to exec set: No such file or directory   # exit=127
+# the vendor convention: each oneshot up is a single executable path
+$ cat /package/admin/s6-overlay/etc/s6-rc/sources/fix-attrs/up
+/package/admin/s6-overlay-3.2.3.0/etc/s6-rc/scripts/fix-attrs
+```
+
+s6-rc executes a oneshot's `up` **as an execline script**, so the old `#!/command/with-contenv sh`
++ `set -eu` form made `set` the program to exec. `opencode` and `engram` depend on `opencode-init`,
+so neither started. Fix: both `up` files are one-line execline invocations
+(`opencode-init/up` imports the container env, sets `HOME=/opt/data`, drops to `hermes`;
+`opencode-ready/up` runs the new image script `robotina/opencode-ready.sh` with the bounded
+credential-aware poll). The `Dockerfile` now asserts every oneshot `up` is one command line, has
+no shebang, does not start with `set`, and starts with an existing executable absolute path.
+
+```text
+# observed after the rebuild
+$ PATH=/command:$PATH s6-rc -a list
+s6rc-oneshot-runner dashboard engram main-hermes opencode fix-attrs opencode-init opencode-ready legacy-cont-init legacy-services
+$ PATH=/command:$PATH s6-svstat /run/service/opencode
+up (pid 210 pgid 210) 25 seconds
+# log sequence: opencode-init successfully started -> engram -> opencode -> opencode-ready
+robotina  | robotina: opencode listo (intentos=1)
+```
+
+### Defect D2 — the ownership self-heal was too shallow (reopens task 10)
+
+```text
+# measured before the fix
+drwx------ 1 hermes hermes /opt/data
+drwxr-xr-x 1 root   root   /opt/data/.config
+drwxr-xr-x 1 root   root   /opt/data/.local
+drwxr-xr-x 1 root   root   /opt/data/.local/share
+ls: cannot access '/opt/data/.local/state': No such file or directory
+# Hermes logged
+ERROR [Telegram] Failed to connect to Telegram: [Errno 13] Permission denied: '/opt/data/.local/state'
+WARNING gateway.run: Host gateway lock could not be opened (Permission denied: '/opt/data/.local/state')
+WARNING gateway.run: ✗ telegram failed to connect
+```
+
+The repair guard `s6-setuidgid hermes test -w /opt/data` passed (the root is `hermes:hermes 0700`),
+so the root-owned children were never repaired. Fix: `10-robotina-state` lists the intermediate
+parents in `install -d -o/-g` (`.config`, `.local`, `.local/share`, plus `.local/state` and
+`.cache`) and tests a per-directory writability list that covers the directories the app writes to,
+not just `/opt/data`, before the bounded `find -prune` re-own. The read-only-mount prune list is
+unchanged.
+
+```text
+# observed after the rebuild
+drwxr-xr-x 1 hermes hermes /opt/data/.config
+drwxr-xr-x 1 hermes hermes /opt/data/.local
+drwxr-xr-x 1 hermes hermes /opt/data/.local/share
+drwxr-xr-x 1 hermes hermes /opt/data/.local/state
+$ stat -c '%u:%g' /opt/data/.local/state
+10000:10000
+$ docker compose logs robotina | grep -cE "Permission denied: '/opt/data/.local/state'|telegram failed to connect"
+0
+robotina  | [Telegram] Connected to Telegram (polling mode)
+```
+
+### Measurement set (previously forecast-only, now measured)
+
+| Item | Raw result |
+| --- | --- |
+| Nested mounts | `/dev/sdd on /opt/data/.engram type ext4 (rw,relatime)`; `/dev/sdd on /opt/data/.local/share/opencode type ext4 (rw,relatime)` — neither `9p` nor `virtiofs` |
+| Nested mount type (Docker) | `volume /var/lib/docker/volumes/robotina_engram_db/_data -> /opt/data/.engram`; `volume …/robotina_opencode_db/_data -> /opt/data/.local/share/opencode` |
+| Negative control | marker `.robotina-probe` written inside the volume; host bind `hermes/.engram` empty; the volume holds `.robotina-probe`, `engram.db`, `engram.db-shm`, `engram.db-wal` |
+| Durability | marker survived `docker compose down` + `docker compose up -d`; volume count = 2 |
+| EP4 cold start | `StartedAt 2026-09-22T18:18:31.298Z` → `opencode listo (intentos=1)` at `18:18:36.148Z` = **≈ 4.85 s** (bound 120 s) |
+| Capabilities (uid 10000 `opencode serve`) | `CapInh=0x0 CapPrm=0x0 CapEff=0x0 CapBnd=0x00000000000000cb CapAmb=0x0 NoNewPrivs=1` |
+| `pids` at rest | `pids.current=54`, `pids.max=1024` — peak (task 26) not measured |
+| Key distinctness (CR2/CR3) | opencode `286c7a04…`, hermes `06c38c58…` → differ; both match the exported shell env (see finding) |
+| Duplicate home (SL1) | `opencode serve` `HOME=/opt/data` and Hermes main program `HOME=/opt/data` |
+| Isolation (EP2/EP3) | host `curl 127.0.0.1:4096` exit 7; `egress-proxy` `/dev/tcp/robotina/4096` refused; peer control `400`, `robotina:4096` refused (exit 7) |
+| Auth protection (EP1/EP4) | with `-u` exit 0; without `-u` **HTTP 401** → the endpoint is auth-protected |
+| Not-ours warning | 8 × Hermes `virtiofs/9p` SQLite message (`state.db`, `response_store.db`, `runs_idempotency.db`, `cron/executions.db`, `kanban.db`, `shared-state.db`) — pre-existing Hermes state on the `/opt/data` bind; **not introduced by this change** |
+
+### Findings recorded by slice 05
+
+- The EP1/EP4 `NOTE` in `specs/opencode-endpoint/spec.md` should record the auth-protected
+  observation; `specs/` is outside this session's allowed edit surfaces, so it is reported, not
+  edited. The recipes are already credential-aware.
+- The `.env`-reference half of task 23 could not be asserted: Compose gives the process environment
+  precedence over `.env`, so the container used the exported 67-byte keys instead of the `.env`
+  51-byte values. Distinctness still holds.
+- The in-container `robotina:4096` negative-control probe is confounded by the proxy environment
+  (Squid deny page, exit 0); the unconfounded proof is the peer-container refusal.
 
 ## Next step
 

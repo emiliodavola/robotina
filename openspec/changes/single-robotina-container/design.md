@@ -280,6 +280,25 @@ Both longruns also carry a `finish` script (Q3, §9.2). Every run/up script star
 `#!/command/with-contenv` — without it the container environment (`x-egress-env`, `TZ`,
 `GITHUB_TOKEN`, both API keys, `OPENCODE_SERVER_PASSWORD`) never reaches the service.
 
+> **AMENDMENT A2 — apply-observed (slice 05, runtime).** The `#!/command/with-contenv sh` form
+> above is correct for **longruns** (`run`/`finish`, ordinary shell scripts) but **invalid for
+> oneshot `up` files**: s6-rc executes a oneshot's `up` **as an execline script**, so a shebang
+> plus a leading `set -eu` makes `set` the program to exec. Observed live:
+> `s6-rc-oneshot-run: fatal: unable to exec set: No such file or directory` and
+> `unable to start service opencode-init: command exited 127`; `opencode` and `engram` (which
+> depend on `opencode-init`) never started. Reproduced with
+> `/package/admin/execline/command/execlineb /etc/s6-overlay/s6-rc.d/opencode-init/up`. The
+> vendor's own `.../sources/*/up` files confirm the convention: each is a single line containing
+> an absolute executable path. The implemented form keeps §5.1's intent — import the container
+> environment, run the file work as uid 10000 with `HOME=/opt/data`, keep the bounded
+> credential-aware poll — as one-line execline invocations:
+> `opencode-init/up` =
+> `/command/with-contenv /usr/bin/env HOME=/opt/data /command/s6-setuidgid hermes /opt/robotina/opencode-init.sh`;
+> `opencode-ready/up` = `/command/with-contenv /opt/robotina/opencode-ready.sh` (the poll moved to
+> the image script `robotina/opencode-ready.sh`). §5.5's build assertions are extended so a
+> shebang or a leading `set` in any oneshot `up` fails the build. See `apply-progress.md` slice 05,
+> defect D1.
+
 ### 5.2 The `opencode` run script (sketch, English comments in the file are Spanish per repo convention)
 
 ```sh
@@ -475,6 +494,23 @@ export` with a default data dir would silently export an empty store.
    10000) instead of hard-coding it, so a `HERMES_UID` override does not silently break
    ownership. The specs' numeric proofs assume the default 10000; that assumption is stated in
    the docs (§17).
+
+> **AMENDMENT A1 — apply-observed (slice 04, tasks 10–12).** Step 2's literal
+> `chown -R 10000:10000 /opt/data` cannot be implemented as written once the full mount table is
+> considered: `compose.yml` also mounts **two read-only binds under `/opt/data`** —
+> `/opt/data/skins` (from `./hermes/skins`) and `/opt/data/skills/stack` (from `./hermes/skills`).
+> A recursive chown that descends into them fails with `Read-only file system`; under `set -e`
+> that aborts `cont-init` and the container start. `chown` additionally has **no
+> `--one-file-system` option** (measured in the image: absent from `chown --help`). The
+> implemented mechanism is therefore
+> `find /opt/data \( -path /opt/data/skins -o -path /opt/data/skills/stack
+> -o -path /opt/data/.engram -o -path /opt/data/.local/share/opencode \) -prune -o
+> -exec chown "$uid:$gid" {} +`, with `uid`/`gid` derived from `id -u/-g hermes` (step 4).
+> The observable is unchanged: a freshly created host state tree becomes writable by the
+> application uid with no host-side privileged step (SL6), and the two read-only binds are left
+> untouched. Step 3's bounded chown on the two volume roots is unchanged. Proven in-image against
+> real read-only mounts (script exit 0; writable state dirs `10000:10000`; read-only mounts
+> `0:0`); see `apply-progress.md` slice 04, deviation D2/D4.
 
 ### 8.2 Why this replaces the host step
 
