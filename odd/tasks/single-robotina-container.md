@@ -991,6 +991,35 @@ logs: "[Telegram] Connected to Telegram (polling mode)"
   line ~116 names the original five-capability `0xcb` set, but only inside a labelled
   `AMENDMENT (apply, task 28)` note — honest history, not a contradiction; left untouched.
 
+## Delivery (PRs opened)
+
+Chained PRs, `feature-branch-chain`, tracker `feat/single-robotina-container`. Each child PR's
+base is the previous slice, so every diff shows exactly one work unit.
+
+| PR | Base | Head | Diff |
+| --- | --- | --- | --- |
+| [#3](https://github.com/emiliodavola/robotina/pull/3) | tracker | `…-01-artifacts` | +5005 |
+| [#4](https://github.com/emiliodavola/robotina/pull/4) | `…-01-artifacts` | `…-02-compose` | +488 −158 |
+| [#5](https://github.com/emiliodavola/robotina/pull/5) | `…-02-compose` | `…-03-image` | +674 −245 |
+| [#6](https://github.com/emiliodavola/robotina/pull/6) | `…-03-image` | `…-04-supervision` | +1079 −40 |
+| [#7](https://github.com/emiliodavola/robotina/pull/7) | `…-04-supervision` | `…-05-identity` | +403 −92 |
+| [#8](https://github.com/emiliodavola/robotina/pull/8) | `…-05-identity` | `…-06-scripts` | +368 −22 |
+| [#9](https://github.com/emiliodavola/robotina/pull/9) | `…-06-scripts` | `…-07-docs` | +669 −272 |
+| [#10](https://github.com/emiliodavola/robotina/pull/10) | `…-07-docs` | `…-08-records` | +762 −429 |
+| [#11](https://github.com/emiliodavola/robotina/pull/11) | `…-08-records` | `…-09-measurements` | +360 −11 |
+| [#12](https://github.com/emiliodavola/robotina/pull/12) | `…-09-measurements` | `…-10-capkill` | +518 −80 |
+| [#13](https://github.com/emiliodavola/robotina/pull/13) | `…-10-capkill` | `…-11-evidence` | +580 −38 |
+| [#14](https://github.com/emiliodavola/robotina/pull/14) | `…-11-evidence` | `…-12-final` | +341 −32 |
+| [#15](https://github.com/emiliodavola/robotina/pull/15) | `…-12-final` | `…-13-archive` | +1724 |
+
+Merge bottom-up; retarget each child once its parent lands. The tracker PR to `main` can be
+opened only after #3 merges into the tracker, because the tracker branch currently has no diff
+against `main`.
+
+**Honest note on PR size:** each PR is one work unit with a clean diff, but several exceed the
+~650-line per-slice acceptance because the process record (`apply-progress.md`, 150–270 lines
+per slice) travels with its slice. Implementation-only diffs are smaller.
+
 ## Next step
 
 **All 45 implementation tasks are complete.** The final tree passed the end-to-end suite
