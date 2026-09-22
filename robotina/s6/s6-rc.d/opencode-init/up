@@ -1,7 +1,1 @@
-#!/command/with-contenv sh
-# Oneshot de arranque: corre el trabajo de archivos como uid 10000, asi que todo
-# lo que escribe ya queda con el dueno correcto y no hace falta un chown
-# posterior. El script real vive en la imagen (/opt/robotina/opencode-init.sh) y
-# es idempotente por construccion.
-set -eu
-exec s6-setuidgid hermes /opt/robotina/opencode-init.sh
+/command/with-contenv /usr/bin/env HOME=/opt/data /command/s6-setuidgid hermes /opt/robotina/opencode-init.sh

@@ -280,6 +280,25 @@ Both longruns also carry a `finish` script (Q3, §9.2). Every run/up script star
 `#!/command/with-contenv` — without it the container environment (`x-egress-env`, `TZ`,
 `GITHUB_TOKEN`, both API keys, `OPENCODE_SERVER_PASSWORD`) never reaches the service.
 
+> **AMENDMENT A2 — apply-observed (slice 05, runtime).** The `#!/command/with-contenv sh` form
+> above is correct for **longruns** (`run`/`finish`, ordinary shell scripts) but **invalid for
+> oneshot `up` files**: s6-rc executes a oneshot's `up` **as an execline script**, so a shebang
+> plus a leading `set -eu` makes `set` the program to exec. Observed live:
+> `s6-rc-oneshot-run: fatal: unable to exec set: No such file or directory` and
+> `unable to start service opencode-init: command exited 127`; `opencode` and `engram` (which
+> depend on `opencode-init`) never started. Reproduced with
+> `/package/admin/execline/command/execlineb /etc/s6-overlay/s6-rc.d/opencode-init/up`. The
+> vendor's own `.../sources/*/up` files confirm the convention: each is a single line containing
+> an absolute executable path. The implemented form keeps §5.1's intent — import the container
+> environment, run the file work as uid 10000 with `HOME=/opt/data`, keep the bounded
+> credential-aware poll — as one-line execline invocations:
+> `opencode-init/up` =
+> `/command/with-contenv /usr/bin/env HOME=/opt/data /command/s6-setuidgid hermes /opt/robotina/opencode-init.sh`;
+> `opencode-ready/up` = `/command/with-contenv /opt/robotina/opencode-ready.sh` (the poll moved to
+> the image script `robotina/opencode-ready.sh`). §5.5's build assertions are extended so a
+> shebang or a leading `set` in any oneshot `up` fails the build. See `apply-progress.md` slice 05,
+> defect D1.
+
 ### 5.2 The `opencode` run script (sketch, English comments in the file are Spanish per repo convention)
 
 ```sh

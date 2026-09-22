@@ -26,7 +26,14 @@
 #      ya no deberia pasar; se mantiene como AVISO, nunca como fallo.
 set -eu
 
-CONFIG_DIR="${HOME:-/opt/data}/.config/opencode"
+# HOME es el contrato, no algo que se herede: el `up` del oneshot puede correr
+# con el HOME=/root del contenedor (el que trae la imagen vendor), asi que se
+# fija aca tambien. El script nunca depende de que el entorno traiga el valor
+# correcto; /opt/data es el arbol de estado del agente.
+HOME=/opt/data
+export HOME
+
+CONFIG_DIR="$HOME/.config/opencode"
 STAGED="/opt/gentle-ai-stage/.config/opencode"
 OVERLAY="/opt/robotina/overlay.json"
 

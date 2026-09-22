@@ -250,13 +250,24 @@ RUN set -eux; \
 # del servicio (`run` para longrun, `up` para oneshot) presente, ejecutable y
 # con `sh -n` limpio, el `finish` de ambos longruns, las aristas de
 # `dependencies.d` de §5.1 y las cuatro entradas del bundle `user2`.
+#
+# El `up` de un oneshot NO es un script de shell: s6-rc lo ejecuta con execline
+# y toma el primer token como el programa a ejecutar. Un shebang o un `set -eu`
+# inicial mueren con `unable to exec set` y el servicio sale 127 (defecto real
+# de slice 04: `opencode-init` fallaba, y `opencode`/`engram` no arrancaban por
+# depender de el). Por eso el bloque exige para cada oneshot UNA linea de
+# comando, sin shebang, sin `set` inicial, con programa de ruta absoluta que
+# exista en la imagen, y guarda la logica de shell en un script propio de la
+# imagen (`opencode-ready.sh`).
 COPY . /opt/robotina-src/
 RUN set -eux; \
     install -d /opt/robotina; \
     install -m 0644 /opt/robotina-src/overlay.json /opt/robotina/overlay.json; \
     install -m 0755 /opt/robotina-src/opencode-init.sh /opt/robotina/opencode-init.sh; \
+    install -m 0755 /opt/robotina-src/opencode-ready.sh /opt/robotina/opencode-ready.sh; \
     install -m 0755 /opt/robotina-src/healthcheck.sh /opt/robotina/healthcheck.sh; \
     sh -n /opt/robotina/opencode-init.sh; \
+    sh -n /opt/robotina/opencode-ready.sh; \
     sh -n /opt/robotina/healthcheck.sh; \
     test -d /opt/robotina-src/s6/cont-init.d; \
     for f in /opt/robotina-src/s6/cont-init.d/*; do \
@@ -288,7 +299,23 @@ RUN set -eux; \
         oneshot) s="$n/up"; f="" ;; \
         *) echo "robotina: type invalido en $n: $t" >&2; exit 1 ;; \
       esac; \
-      test -f "$dst/$s"; chmod 0755 "$dst/$s"; test -x "$dst/$s"; sh -n "$dst/$s"; \
+      test -f "$dst/$s"; chmod 0755 "$dst/$s"; test -x "$dst/$s"; \
+      if [ "$t" = "oneshot" ]; then \
+        cmds="$(grep -vE '^[[:space:]]*(#|$)' "$dst/$s" | wc -l)"; \
+        test "$cmds" -eq 1; \
+        case "$(head -n1 "$dst/$s")" in \
+          '#!'*) echo "robotina: $dst/$s tiene shebang; un oneshot up debe ser execline" >&2; exit 1 ;; \
+        esac; \
+        first="$(grep -vE '^[[:space:]]*(#|$)' "$dst/$s" | head -n1)"; \
+        case "$first" in \
+          set|set\ *) echo "robotina: $dst/$s empieza con 'set'; debe ser execline" >&2; exit 1 ;; \
+          /*) ;; \
+          *) echo "robotina: $dst/$s no empieza con una ruta absoluta" >&2; exit 1 ;; \
+        esac; \
+        test -x "${first%% *}"; \
+      else \
+        sh -n "$dst/$s"; \
+      fi; \
       if [ -n "$f" ]; then test -f "$dst/$f"; chmod 0755 "$dst/$f"; test -x "$dst/$f"; sh -n "$dst/$f"; fi; \
       echo "robotina: servicio $n ($t) validado"; \
     done; \
