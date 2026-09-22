@@ -75,7 +75,7 @@ Estimate: **high** risk of exceeding 400 authored lines. Re-forecast after
 
 - [x] T1 — ODD feature document (this file).
 - [x] T2 — SDD init: `openspec/config.yaml` + project SDD context.
-- [x] T3 — SDD explore: map coupling, call sites and what the merge must preserve.- [ ] T4 — SDD proposal: PRD for the single `robotina` container.
+- [x] T3 — SDD explore: map coupling, call sites and what the merge must preserve.- [x] T4 — SDD proposal: PRD for the single `robotina` container.
 - [x] T5 — SDD spec: 39 requirements / 113 scenarios across six domain specs (+1 corrective amendment).
 - [x] T6 — SDD design: image composition, s6 wiring, key isolation, state layout (Q1–Q12 resolved).
 - [x] T7 — SDD tasks: 45 tasks in 10 phases + Review Workload Forecast (over budget, chained).
@@ -91,7 +91,8 @@ Estimate: **high** risk of exceeding 400 authored lines. Re-forecast after
 - `opencode serve` is reachable at `127.0.0.1:4096` from inside `robotina` and is
   **not** reachable from the host or from any other container.
 - Hermes uses only `HERMES_OPENCODE_GO_API_KEY`; OpenCode uses only
-  `OPENCODE_GO_API_KEY`; neither process can read the other's key.
+  `OPENCODE_GO_API_KEY`; each process is configured with only its own key (per-process key
+  isolation is **not enforceable** at equal uid — see CR6).
 - The bot answers/introduces itself as `robotina`.
 - `/workspace`, engram state and opencode sessions persist across recreate.
 - No direct egress: all outbound goes through `egress-proxy`.
@@ -142,6 +143,19 @@ Frozen by the user after the explore phase:
   equivalent, export-before-migrate safety net, BotFather display name only, in-container
   operator recipes, persistence table, measured versions, uid-10000 assumption);
   `scripts/fix-permissions.ps1` deleted (Q7 resolved).
+- 2026-09-22: `sdd-apply` slice 08 (records) — `SECURITY.md` rewritten for the merged reality
+  (R1 retired credential invariant with the prompt-injection reach stated; R2 non-enforceable
+  per-process isolation at equal uid; R4 single lifecycle; R6 superseded interop task file; R7
+  shared workspace with no container boundary; loopback-only `OPENCODE_SERVER_PASSWORD`
+  defense-in-depth; engram logs to the container stream; PID-1-must-be-the-entrypoint rule;
+  nested-volume layout). `openspec/project.md` updated for the one-container stack; the seven
+  stale `OPEN ITEM` spec annotations replaced with `CLOSED BY DESIGN §…` notes (Q1, Q2, Q3, Q5,
+  Q7, Q10, Q12); the `odd/tasks/agent-interop-http.md` superseded-by note added.
+- **Task 37 outcome (recorded):** `git grep -nE "docker compose confi[g]" -- openspec/config.yaml`
+  reported two prose lines naming the static-validation command without a flag on the same line
+  (`testing.static_validation.note` and the `apply` rule). Both were reworded to refer to the bare
+  form / the static-validation command by description; the re-run reports four hits, every one
+  carrying `-q` or `--services` on the same line.
 
 ## Delivery plan (decided at sdd-tasks)
 - Strategy: **chained PRs**; chain strategy: **`feature-branch-chain`**.
@@ -162,10 +176,10 @@ Frozen by the user after the explore phase:
 | S1 compose | `feat/single-robotina-container-02-compose` | `53dc10e` | 449 (646 with the process record) | committed |
 | S2 image | `feat/single-robotina-container-03-image` | `68d3d30` | 658 | committed |
 | S4 supervision | `feat/single-robotina-container-04-supervision` | committed | 287 (520 with the process record) | committed; **slice-05 fixes appended** (two runtime defects) |
-| S5 identity | pending | — | — | pending |
-| S6 migration & scripts | pending | — | — | pending |
-| S7 docs | pending | — | — | pending |
-| S8 records | pending | — | — | pending |
+| S5 identity | `feat/single-robotina-container-05-identity` | `4b476a8` | 268 | committed |
+| S6 migration & scripts | `feat/single-robotina-container-06-scripts` | `92e1a31` | 194 | committed |
+| S7 docs | `feat/single-robotina-container-07-docs` | `fd016b3` | 726 (README pair 679) | committed; `scripts/fix-permissions.ps1` deleted (Q7) |
+| S8 records | `feat/single-robotina-container-08-records` | — | in progress | this run (`SECURITY.md`, `openspec/project.md`, ODD notes, spec alignment) |
 | S9 measurement evidence | pending | — | — | pending |
 
 Task progress: **19/45** implementation tasks complete (12 through slice 04; +7 in slice 05:
@@ -180,11 +194,15 @@ Gated on a live `.env` (needs reissued keys) and `docker compose up`: tasks 18, 
 whole measurement phase — the nested volume-inside-bind proof, the readiness gate, the
 measured `CapEff`/`CapBnd`, and `pids.current` under load.
 
-**Status after slice 05 (stack live):** tasks 18, 19, 20, 24 and 25 are now measured and complete
+**Status after slice 07 (stack live):** tasks 18, 19, 20, 24 and 25 are measured and complete
 (see the slice-05 evidence section); the readiness gate succeeded in ≈4.85 s; capabilities match
-design §13. Still gated: task 21's 3× recreation loop + gate-failure observation, task 22 (identity
-not implemented), tasks 26/38 (peak `pids.current` under the concurrent worst case), and tasks
-27–28.
+design §13. Slice 06 implemented the identity layer (tasks 13–16: skin, `display.skin`, context,
+skills), slice 06 scripts (tasks 29–32: migration helper, export-state, `fix-permissions` interim,
+`.env.example`) and slice 07 docs (task 33: both READMEs) are complete; Q7 resolved as deletion of
+`scripts/fix-permissions.ps1`. Still gated: task 21's 3× recreation loop + gate-failure observation,
+task 22 (runtime identity + state-ownership batch — the identity half is implementable now, the SL6
+ownership half too; not yet run), tasks 26/38 (peak `pids.current` under the concurrent worst case),
+and tasks 27–28.
 
 | PR | Slice | Contents | Est. lines |
 | --- | --- | --- | --- |
@@ -512,4 +530,8 @@ robotina  | [Telegram] Connected to Telegram (polling mode)
 
 ## Next step
 
-Launch `sdd-init` (T2), then `sdd-explore` (T3).
+Continue `sdd-apply` on the remaining tasks — 21, 22, 26, 27, 28, 38, 40, 41, 42, 43, 44 and 45 —
+as the next slices (runtime verification, measurement evidence, final rollback/secret audit), then
+run `sdd-archive` (T9). Delivery (T10: branch pushed, PR opened) stays a separate user decision.
+The measurement-dependent tasks (26, 38, 40, 41) cannot close until the concurrent-worst-case
+`pids.current` peak is sampled.

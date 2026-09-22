@@ -36,7 +36,7 @@ testing:
     available: true
     command: "docker compose config -q"
     note: >-
-      Use the `-q` form ONLY. Bare `docker compose config` resolves and PRINTS .env values
+      Use the `-q` form ONLY. The bare form (without `-q`) resolves and PRINTS .env values
       (Telegram token, both model API keys, OPENCODE_SERVER_PASSWORD) into stdout and any
       transcript that captures it. Never run the unfiltered form, and never delegate a task
       that may run it without stating this explicitly.
@@ -103,7 +103,7 @@ rules:
     - "tdd: false"
     - "test_command: null"
     - "verify_command: docker compose config -q && docker compose build"
-    - "Never run `docker compose config` without `-q` (secret leak, see testing.static_validation)."
+    - "Never run the static-validation command without `-q` (secret leak, see testing.static_validation)."
   verify:
     - "static: docker compose config -q"
     - "build: docker compose build"

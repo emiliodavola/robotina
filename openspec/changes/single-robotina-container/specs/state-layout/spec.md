@@ -176,8 +176,10 @@ for, the migration; and the pre-merge host folders SHALL NEVER be deleted by thi
 - PROOF: capture `sha256sum <destination>` before, run the migration step twice, capture again
   (identical hashes). The exact migration command is the one design names (proposal §14 Q12);
   this scenario constrains the observable, not the mechanism.
-- OPEN ITEM: the migration mechanism (documented host-side copy helper/step vs a one-off
-  read-only legacy mount during the migration run) is proposal §14 Q12, owned by `sdd-design`.
+- CLOSED BY DESIGN §12: a host-side documented helper `scripts/migrate-state.ps1` (per-path
+  copy-forward only when the destination is absent, non-blocking, idempotent, never delete),
+  documented in both READMEs with a POSIX equivalent; the legacy folders stay as the rollback
+  safety net.
 
 #### Scenario: Nothing is deleted
 
@@ -238,7 +240,9 @@ Ownership of the writable state roots SHALL be established by the container itse
 startup (a root-privileged cont-init step running before user services), so that a freshly
 created host state folder is writable by the application uid without a host-side privileged
 step. Whether `scripts/fix-permissions.ps1` is deleted or kept and re-documented SHALL NOT be
-decided here (proposal §14 Q7; deleting a host script requires user confirmation).
+decided here (Q7 — CLOSED BY DESIGN §8.4, confirmed by the user: the host script is deleted and
+the container-side cont-init step replaces it; deleting a host script requires user
+confirmation).
 
 #### Scenario: The application uid can write the state root
 

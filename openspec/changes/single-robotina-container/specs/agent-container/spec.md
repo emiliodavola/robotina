@@ -147,8 +147,8 @@ entrypoint rejects arbitrary uids and the non-PID-1 fallback starts no supervise
 `opencode` and `engram` SHALL run as **supervised s6 services** visible to s6, not as
 backgrounded children of an entrypoint. Their output SHALL be observable through a
 documented path or through the bounded container log stream (today's redirect to
-`/var/log/engram.log` silently fails for uid 10000 — proposal §14 Q10 is the open item for
-which observable path is chosen).
+`/var/log/engram.log` silently fails for uid 10000 — CLOSED BY DESIGN §9.3: the bounded
+container log stream, via s6, is the chosen observable path).
 
 #### Scenario: s6 lists both services
 
@@ -168,15 +168,17 @@ which observable path is chosen).
 - NOTE: the health probe is credential-aware because `OPENCODE_SERVER_PASSWORD` is kept
   (design §10.3), so a password-protected `/global/health` cannot turn this scenario into a
   false failure. The password is never echoed.
-- NOTE: the restart backoff policy (unbounded restart vs a `finish` script) is proposal §14 Q3,
-  owned by `sdd-design`; this scenario asserts recovery, not the delay distribution.
+- NOTE: the restart backoff policy is CLOSED BY DESIGN §9.2: a `finish` script with capped
+  exponential backoff (1→30 s) and a healthy-run reset, with unbounded restarts and no latch;
+  this scenario asserts recovery, not the delay distribution.
 
 #### Scenario: engram's output is actually observable
 
 - GIVEN the stack is up
 - WHEN the container log stream is read
 - THEN it is non-empty and contains engram output **or**, if design chose a log file path
-  (Q10), that path exists and is non-empty
+  (Q10 — CLOSED BY DESIGN §9.3: the container log stream is the chosen path, so no separate log
+  file exists), that path exists and is non-empty
 - PROOF: `docker compose logs --tail 200 robotina` (plus, when design names a file,
   `docker compose exec robotina sh -c 'test -s <design-named-log-path>'`)
 
@@ -208,8 +210,9 @@ with its rationale by design/verify).
 - WHEN the container cgroup's PID ceiling is read
 - THEN the value is a finite positive integer and is NOT `max`
 - PROOF: `docker compose exec robotina sh -c 'cat /sys/fs/cgroup/pids.max'`
-- OPEN ITEM: the final value and its recorded rationale are proposal §14 Q1 (measure a running
-  merged container under a build + LSP workload).
+- CLOSED BY DESIGN §16: `pids_limit: 1024` on the merged service, confirmed or raised at apply
+  by measuring a running merged container under a build + LSP workload (the measured peak itself
+  is recorded by the measurement task).
 
 ### Requirement: AC7 — `robotina` is an `agents`-only service with no published port
 

@@ -565,13 +565,13 @@ inferred.
     `grep -rn "docker compose exec opencode" README.md README.en.md SECURITY.md scripts/ hermes/ .env.example`,
     `grep -rn "docker inspect hermes\|docker inspect opencode" README.md README.en.md SECURITY.md .env.example`.
 
-- [ ] 34. Update `openspec/project.md`: services table, coupling map, repository layout,
+- [x] 34. Update `openspec/project.md`: services table, coupling map, repository layout,
   known traps, verification expectations and the SDD session configuration, all for the merged
   reality. Files: `openspec/project.md`. Depends on: task 33.
   - Verify: `grep -n "opencode/Dockerfile" openspec/project.md` (no output);
     `grep -c "robotina" openspec/project.md` (non-zero).
 
-- [ ] 35. Add the **superseded-by** note to `odd/tasks/agent-interop-http.md` (R6) without
+- [x] 35. Add the **superseded-by** note to `odd/tasks/agent-interop-http.md` (R6) without
   rewriting its history, and refresh `odd/tasks/single-robotina-container.md`: mark the phase
   tasks complete, correct the stale acceptance line that claims "neither process can read the
   other's key" to the CR6 wording, and replace the `## Next step` pointer.
@@ -582,7 +582,7 @@ inferred.
     existing record); `grep -niE "neither process can read" odd/tasks/single-robotina-container.md`
     (no output).
 
-- [ ] 36. Align the stale `OPEN ITEM` annotations in this change's own specs with the design
+- [x] 36. Align the stale `OPEN ITEM` annotations in this change's own specs with the design
   decisions that closed them: in `specs/agent-container/spec.md` (Q1, Q3, Q10),
   `specs/opencode-endpoint/spec.md` (Q2, Q5) and `specs/state-layout/spec.md` (Q7, Q12),
   replace each open annotation with a `CLOSED BY DESIGN §…` note naming the section
@@ -597,7 +597,7 @@ inferred.
     `grep -rniE "owned by \`sdd-design\`" openspec/changes/single-robotina-container/specs/`
     (no output).
 
-- [ ] 37. Conditional wording alignment: check `openspec/config.yaml`'s prose line that names
+- [x] 37. Conditional wording alignment: check `openspec/config.yaml`'s prose line that names
   the static-validation command against design §19.3's same-line rule; reword only if the
   check reports a line, and record the outcome either way.
   Files: `openspec/config.yaml` (only if the check reports a hit). Depends on: task 36.
@@ -619,7 +619,7 @@ inferred.
 
 ## Phase 8 — `SECURITY.md` evidence entries
 
-- [ ] 39. Rewrite `SECURITY.md`'s non-measured retained entries (Spanish): R1 (credential
+- [x] 39. Rewrite `SECURITY.md`'s non-measured retained entries (Spanish): R1 (credential
   invariant retired, PAT kept as-is, prompt-injection reach stated), R2 (per-process key
   isolation **not enforceable** at equal uid; acceptance expressed as "configured with only its
   own key"), R4 (single lifecycle), R6 (superseded task file), R7 (shared workspace without a
@@ -681,7 +681,10 @@ inferred.
     (2);
     `HOST_DATA_DIR=$(grep -m1 '^HOST_DATA_DIR=' .env | cut -d= -f2- | tr -d "\r"); ls -ld "$HOST_DATA_DIR/opencode" "$HOST_DATA_DIR/git" "$HOST_DATA_DIR/go"`
     (all three exist) and `ls -A "$HOST_DATA_DIR/opencode" "$HOST_DATA_DIR/git"` (non-empty);
-    `git ls-files scripts/fix-permissions.ps1` (still present — not deleted).
+    `git ls-files scripts/fix-permissions.ps1` (**no output — the file was deleted** with the
+    user's explicit Q7 confirmation; the rollback path stays intact because git history retains
+    the script and neither state volume nor any host folder is destroyed, so the deletion is a
+    revertible unit alongside the rest of this change).
 
 - [ ] 45. Final secret-leak audit over the whole change, including this file.
   Files: none. Depends on: tasks 42, 43, 44.
@@ -715,6 +718,15 @@ inferred.
 - **Slice 07 update (apply):** `scripts/migrate-state.ps1`'s header comment was reworded to drop
   the banned two-container phrasing (agent-container AC9's grep covers `scripts/`). Comment only;
   no behaviour changed.
+- **Slice 08 update (apply):** task 44's verification text was corrected — it previously expected
+  `git ls-files scripts/fix-permissions.ps1` to print the path ("still present — not deleted"),
+  which was written when keeping the file was the interim default. The user has since confirmed
+  deletion (Q7), so the corrected check expects **no output** and states the rollback story (git
+  history retains the script; no volume or host folder is destroyed).
+- **Slice 08 update (apply):** task 37 ran and did report two prose lines in `openspec/config.yaml`
+  that named the static-validation command without `-q` on the same line (the `testing.static_validation`
+  note and the `apply` rule). Both were reworded to refer to "the bare form"/"the
+  static-validation command" by description, and the re-run is clean.
 - The five proof defects reported in design §19 are already reflected in the spec recipes;
   tasks 19 and 21 close the two remaining apply obligations, and task 40 records the observed
   gate behaviour.

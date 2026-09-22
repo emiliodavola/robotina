@@ -1532,3 +1532,226 @@ ls -ld "$HOST_DATA_DIR/hermes/.engram" "$HOST_DATA_DIR/hermes/.local/share/openc
 Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
 same line; the bare `docker compose config` form was never run and is never written here. No token
 or key value was ever printed — version probes and greps only, never `.env` values.
+
+---
+
+
+---
+
+# Slice 08 — `feat/single-robotina-container-08-records` (records: SECURITY.md + project.md + spec alignment, tasks 34, 35, 36, 37, 39)
+
+Appended to the cumulative body above. Nothing above was modified except the header line, which
+now marks this file as cumulative through slice 08.
+
+## Structured status consumed
+
+- Native `gentle-ai.sdd-status` v2 provided by the parent: `changeName: single-robotina-container`,
+  `artifactStore: openspec`, `nextRecommended: apply`, `applyState: ready`,
+  `dependencies.apply: ready`, `taskProgress: 28/45 complete, 17 pending`, `blockedReasons: []`,
+  `notes: []`.
+- `actionContext`: `mode: repo-local`, `workspaceRoot: C:\Users\elaze\Desktop\robotina`,
+  `allowedEditRoots: ["C:\Users\elaze\Desktop\robotina"]`. **No actionContext warnings** raised by
+  the status engine. Two apply-observed findings (F1, F2) are recorded below.
+- Review-workload gate: the parent prompt carries the resolved delivery path — chained PRs,
+  `feature-branch-chain`, tracker `feat/single-robotina-container`, current slice branch
+  `feat/single-robotina-container-08-records`, `exception-ok` accepted per slice (~650 authored
+  lines, user decision). `tasks.md`'s forecast (`Decision needed before apply: Yes`, `Chained PRs
+  recommended: Yes`, `400-line budget risk: High`) is satisfied by that resolved path. This slice
+  implements tasks 34, 35, 36, 37 and 39 only.
+- `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`, `test_command: null`; the
+  parent prompt did not activate strict TDD.
+- No child subagent was launched. No `git commit`/`git push`/PR was performed — the parent owns the
+  index and delivery. No token or key value was ever printed.
+
+## Completed tasks (33/45 cumulative, 5/5 of this slice) and their persisted checkbox updates
+
+`openspec/changes/single-robotina-container/tasks.md` was re-read after editing: **33 checked**
+(`grep -c '^- \[x\]'` = 33), **12 pending** (`grep -c '^- \[ \]'` = 12). Tasks 34, 35, 36, 37 and
+39 were flipped to `- [x]` only after their verification commands actually ran and were observed.
+
+| Task | What was done | Verification actually run | Observed result |
+| --- | --- | --- | --- |
+| 34 | `openspec/project.md` rewritten for the merged reality: one-agent services table (`robotina` + `egress-proxy`), the post-merge coupling map (PID 1 = image entrypoint / s6; five capabilities; uid alignment; per-process key wiring; egress proxy separate; `/tmp exec`), repository layout (`robotina/`, `hermes/skins`, `scripts/migrate-state.ps1`; no `opencode/`), networks/persistence (nested volumes), conventions, verification expectations, SDD session configuration (feature-branch-chain + per-slice `size:exception`), and the traps (execline oneshot `up`, `chown` has no `--one-file-system`, Dockerfile change does not recreate, `HOST_DATA_DIR` mandatory) | `grep -n "opencode/Dockerfile" openspec/project.md`; `grep -c "robotina" openspec/project.md`; plus the banned exec/inspect grep | no output (exit 1); **`17`**; `docker compose exec (hermes\|opencode)` / `docker inspect (hermes\|opencode)` → no output (exit 1) |
+| 35 | Added the **superseded-by** note to `odd/tasks/agent-interop-http.md` (additions only, history preserved) and refreshed `odd/tasks/single-robotina-container.md`: T4 flipped complete, the acceptance line corrected to the CR6 wording, the slice-progress table updated (S5–S7 committed, S8 in progress), the stale "identity not implemented" status rewritten, and the `## Next step` pointer replaced | `grep -niE "superseded" odd/tasks/agent-interop-http.md`; `git diff --stat -- odd/tasks/agent-interop-http.md`; `grep -niE "neither process can read" odd/tasks/single-robotina-container.md` | 1 match (line 3); **7 insertions, 0 deletions** (pure additions); no output (exit 1) |
+| 36 | Replaced every stale `OPEN ITEM`/`owned by sdd-design` annotation in the change's own specs with a `CLOSED BY DESIGN §…` note: agent-container AC5 (Q10 → §9.3), AC5 NOTE (Q3 → §9.2), AC5 scenario (Q10 → §9.3), AC6 (Q1 → §16); opencode-endpoint EP4 (Q2 → §9.1), EP6 (Q5 → §10.3); state-layout SL4 (Q12 → §12), SL6 (Q7 → §8.4, user-confirmed deletion) | `grep -rn "OPEN ITEM" …/specs/`; `grep -rn "CLOSED BY DESIGN" …/specs/`; `grep -rniE "owned by \`sdd-design\`" …/specs/` | no output (exit 1); **8 matches** across the three files (≥ 7, one per Q1/Q2/Q3/Q5/Q7/Q10/Q12); no output (exit 1) |
+| 37 | Checked `openspec/config.yaml`'s prose against design §19.3's same-line rule; the check **did** report two lines naming the command without a flag (`testing.static_validation.note`, the `apply` rule), so both were reworded to refer to "the bare form"/"the static-validation command" **by description**, and the check was re-run | `git grep -nE "docker compose confi[g]" -- openspec/config.yaml` (before and after); recorded in `odd/tasks/single-robotina-container.md` and `tasks.md` notes | before: 6 hits, two without a flag (lines 39, 106). after: **4 hits, every one carrying `-q` or `--services` on the same line** (lines 37, 43, 105, 108) |
+| 39 | `SECURITY.md` rewritten (Spanish) for the merged reality, keeping the still-true measured content and adding the required non-measured entries: R1 (credential invariant retired, PAT kept as-is, prompt-injection reach stated), R2 (per-process key isolation **not enforceable** at equal uid; acceptance = "each process is configured with only its own key"), R4 (single lifecycle), R6 (superseded interop task file), R7 (shared workspace with no container boundary), the loopback-only `OPENCODE_SERVER_PASSWORD` defense-in-depth rationale, engram's log destination (container stream), the PID-1-must-be-the-entrypoint rule, and the nested-volume layout narrative. Measured values deliberately left to task 40 in a `## Evidencia medida` placeholder. | the five task-39 greps (below) plus the AC9 stale-claim greps over the docs set | all five task-39 greps as expected (non-empty / non-empty / non-empty / no output / no output); all four AC9 greps now clean across `README*`, `SECURITY.md`, `hermes/`, `scripts/`, `.env.example` |
+
+## SECURITY.md content baseline (task 39, before → after)
+
+The file was pervasively two-container (`hermes`/`opencode` as separate services). The rewrite
+removed every stale claim the change's AC9 grep bans and added the four "columns of the merge"
+sections the task enumerates.
+
+```text
+# before the rewrite (residuals owned by the records slice, from slice 07's F1)
+SECURITY.md:271,282,319  http://opencode:4096
+SECURITY.md:3,259,334,467 dos agentes / dos contenedores
+SECURITY.md:360          docker compose exec opencode
+SECURITY.md:128          docker inspect hermes / docker inspect opencode
+SECURITY.md:302          "sin credencial -> 401"
+SECURITY.md:479,484      instructions to run scripts/fix-permissions.ps1
+# after
+grep -rn "http://opencode:4096" README.md README.en.md SECURITY.md hermes/ scripts/   # no output
+grep -rniE "dos agentes|dos contenedores|two agent containers|two containers|sibling container|contenedor hermano" README.md README.en.md SECURITY.md hermes/ scripts/   # no output
+grep -rn "docker compose exec opencode" README.md README.en.md SECURITY.md scripts/ hermes/ .env.example   # no output
+grep -rn "docker inspect hermes\|docker inspect opencode" README.md README.en.md SECURITY.md .env.example   # no output
+grep -rniE "claves? (estan |están )?aislad|keys? are isolated|aisladas por proceso|isolated per process|no puede leer la clave del otro|cannot read the other" README.md README.en.md SECURITY.md hermes/   # no output
+```
+
+The one remaining `fix-permissions` mention in `SECURITY.md` is explanatory text about the Q7
+deletion (the container-side cont-init replaces it), never a setup instruction — the form task 31
+explicitly allows.
+
+## TDD Cycle Evidence
+
+**Not applicable.** `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`,
+`test_command: null`; the parent prompt did not activate strict TDD. No RED/GREEN table is produced
+because no test runner exists and none may be invented. Verification is the documentation grep
+suite above.
+
+## Files changed in this slice (authored line counts)
+
+| File | Change | Additions | Deletions |
+| --- | --- | --- | --- |
+| `SECURITY.md` | rewritten (Spanish) for the merged reality | 383 | 346 |
+| `openspec/project.md` | rewritten (English) for the merged reality | 72 | 49 |
+| `odd/tasks/single-robotina-container.md` | T4 checked, CR6 acceptance wording, slice table + status refresh, `## Next step` replaced, task-37 outcome recorded | 33 | 11 |
+| `openspec/changes/single-robotina-container/tasks.md` | tasks 34–37/39 checked, task 44 verification text corrected, slice-08 notes | 18 | 6 |
+| `odd/tasks/agent-interop-http.md` | superseded-by note | 7 | 0 |
+| `openspec/changes/single-robotina-container/specs/agent-container/spec.md` | 4 `CLOSED BY DESIGN` notes | 10 | 7 |
+| `openspec/changes/single-robotina-container/specs/opencode-endpoint/spec.md` | 2 `CLOSED BY DESIGN` notes | 7 | 5 |
+| `openspec/changes/single-robotina-container/specs/state-layout/spec.md` | 2 `CLOSED BY DESIGN` notes | 7 | 3 |
+| `openspec/config.yaml` | two prose lines reworded (task 37) | 2 | 2 |
+| `openspec/changes/single-robotina-container/apply-progress.md` | this cumulative section | new section | 0 |
+
+- **Authored changed lines excluding this section: 383+346 + 72+49 + 33+11 + 18+6 + 7 + 10+7 +
+  7+5 + 7+3 + 2+2 = 968.** The `SECURITY.md` rewrite alone is **729** authored lines (383+346);
+  it is the required scope of task 39 (the file is the Spanish security record and was written
+  for the retired two-container topology start to finish).
+- **Budget:** 968 vs the accepted per-slice `size:exception` of ~650 — **≈318 over**. It is **not**
+  reducible without dishonesty: the file had to be rewritten rather than patched because the stale
+  `hermes`/`opencode` split runs through the guarantees table, the image-compatibility section, the
+  topology/interop section, persistence, GitHub auth and the shared-workspace section; patching
+  would either leave banned claims or produce a self-contradicting document. Nothing was compressed
+  or deleted to fit (no section, table, measured excerpt or rationale was dropped).
+- **Recommendation:** accept the overage for this slice as-is; do **not** re-slice. `size:exception`
+  is the parent/user's to accept, not claimed here.
+- `git status --porcelain` for the slice: ` M SECURITY.md`, ` M openspec/project.md`,
+  ` M odd/tasks/agent-interop-http.md`, ` M odd/tasks/single-robotina-container.md`,
+  ` M openspec/config.yaml`, ` M openspec/changes/single-robotina-container/tasks.md`,
+  ` M openspec/changes/single-robotina-container/specs/{agent-container,opencode-endpoint,state-layout}/spec.md`.
+
+## Deviations from design / task text
+
+1. **Task 44's verification text was corrected (parent-instructed, task-text only).** It expected
+   `git ls-files scripts/fix-permissions.ps1` to print the path ("still present — not deleted"),
+   written when keeping the file was the interim default. The user has since decided to delete it
+   (Q7), so the check now expects **no output** and states the rollback story (git history retains
+   the script; neither state volume nor any host folder is destroyed, so the deletion reverts as one
+   unit). No file was recreated to satisfy the old text. Observed now: `git ls-files
+   scripts/fix-permissions.ps1` → no output; `git status --porcelain -- scripts/` clean.
+2. **The R6 superseded-by note was inserted after the H1 title, not appended at the end.** It is a
+   7-line pure addition; the existing record is byte-identical (`git diff --stat` = 7 insertions,
+   0 deletions).
+3. **`openspec/project.md` keeps `grep`-bannable strings out but names the retired layout in the
+   historical/known-traps context only** where it is explanatory (e.g. "The legacy `opencode/`,
+   `git/` and `go/` folders are no longer mounted"). The task-34 checks pass.
+
+## Findings for the parent (not fixed here — outside tasks 34–39)
+
+- **F1 — this slice is over the accepted ~650-line per-slice budget (968), driven by the required
+  `SECURITY.md` rewrite (729).** Reported with a `size:exception` recommendation rather than
+  compressed. If a strict budget is preferred, the only cohesive split is 08a (`SECURITY.md`, 729 —
+  itself over 400) and 08b (`project.md` + specs + config + ODD, 239); splitting does not bring 08a
+  under 400.
+- **F2 — no YAML parser was available on the authoring host** (`python`/`pyyaml` and `js-yaml` are
+  both absent), so `openspec/config.yaml` could not be machine-parsed after the task-37 edit. The
+  edit was confined to the text inside an existing `>-` block scalar and an existing double-quoted
+  list item, with indentation and quoting unchanged; `docker compose` does not read this file, so
+  no runtime path depends on it. Flagged for a parser-backed check at `sdd-verify` if desired.
+- **F3 — the remaining task-44 host greps cannot pass on this authoring host** (the legacy
+  `opencode/`, `git/`, `go/` folders never existed here; `HOST_DATA_DIR` holds only `backups`,
+  `hermes`, `workspace`). Only the `fix-permissions` line was corrected in this slice, as
+  instructed; the folder-existence half stays as written for an environment that has the legacy
+  layout.
+- **F4 — measured `SECURITY.md` entries (task 40) are deliberately absent.** A `## Evidencia medida`
+  placeholder states what the measurement task will add; the `CapEff`/`CapBnd` and
+  `mem_limit|6g|pids_limit` greps both return **no output** in `SECURITY.md` after this slice. The
+  `9p|virtiofs` grep still matches the pre-existing WAL-hazard prose (the general virtiofs/9p
+  corruption explanation, unchanged from the original file), not a measured nesting result — task 40
+  must add the actual nesting measurement.
+
+## Remaining tasks (12) — exact unchecked lines from the persisted artifact
+
+```text
+- [ ] 21. Verify the readiness gate holds across repeated recreations and that no
+- [ ] 22. Verify the identity layers and the state-ownership behaviour at runtime (ID1, ID2,
+- [ ] 26. **[measurement-dependent]** Sample the merged cgroup's `pids.current` baseline and
+- [ ] 27. Verify the `opencode-init` semantics at runtime: overlay idempotency (double-run byte
+- [ ] 28. Verify s6 recovery and the single-lifecycle property (AC5, AC8 amended proof).
+- [ ] 38. **[measurement-dependent]** Apply design §16's pre-committed adjustment rule to the
+- [ ] 40. **[measurement-dependent]** Add `SECURITY.md`'s measured evidence entries: R3's
+- [ ] 41. Finalize the change record: replace the ODD file's `## Verification evidence`
+- [ ] 42. Run the verification suite end to end on the final tree and record the result.
+- [ ] 43. Confirm the frozen egress boundary and the mandatory-input guard survived the merge.
+- [ ] 44. Confirm the rollback path is intact: both state volume names unchanged, the three
+- [ ] 45. Final secret-leak audit over the whole change, including this file.
+```
+
+## Workload / PR boundary
+
+- **Slice budget vs actual:** **968 authored changed lines** (729 `SECURITY.md`, 121 `project.md`,
+  94 across the specs/ODD/tasks/config deltas) — ≈318 over the accepted per-slice `size:exception`
+  (~650), entirely because `SECURITY.md` is a required full rewrite. Recommendation: accept as-is;
+  no re-slicing (see F1).
+- **PR boundary:** this slice contains exactly `SECURITY.md`, `openspec/project.md`,
+  `openspec/config.yaml`, the three spec files under
+  `openspec/changes/single-robotina-container/specs/`, `odd/tasks/agent-interop-http.md`,
+  `odd/tasks/single-robotina-container.md`, `openspec/changes/single-robotina-container/tasks.md`
+  (tasks 34–37, 39 + task 44 text) and this `apply-progress.md`. Targeted at the tracker branch
+  `feat/single-robotina-container` under `feature-branch-chain`. The measurement slice (38, 40, 41)
+  and the final verification/rollback slice (42–45) are **not** started.
+- No `git commit`, `git push` or PR was created — the parent owns delivery and the index.
+
+## Verification commands run in this slice (exhaustive, with observed output)
+
+```text
+# --- task 34 ---
+grep -n "opencode/Dockerfile" openspec/project.md                       # no output (exit 1)
+grep -c "robotina" openspec/project.md                                  # 17
+grep -rniE "docker compose exec (hermes|opencode)|docker inspect (hermes|opencode)" openspec/project.md   # no output (exit 1)
+# --- task 35 ---
+grep -niE "superseded" odd/tasks/agent-interop-http.md                  # line 3 (exit 0)
+git diff --stat -- odd/tasks/agent-interop-http.md                      # 1 file changed, 7 insertions(+), 0 deletions
+grep -niE "neither process can read" odd/tasks/single-robotina-container.md   # no output (exit 1)
+# --- task 36 ---
+grep -rn "OPEN ITEM" openspec/changes/single-robotina-container/specs/  # no output (exit 1)
+grep -rn "CLOSED BY DESIGN" openspec/changes/single-robotina-container/specs/   # 8 matches
+grep -rniE "owned by `sdd-design`" openspec/changes/single-robotina-container/specs/   # no output (exit 1)
+# --- task 37 ---
+git grep -nE "docker compose confi[g]" -- openspec/config.yaml          # 6 hits before (39, 106 without a flag); 4 hits after (37, 43, 105, 108, all flagged)
+# --- task 39 ---
+grep -niE "GITHUB_TOKEN" SECURITY.md                                    # lines 114, 263, 447, 594
+grep -niE "mismo uid|equal uid|no se puede aislar|not enforceable|misma identidad" SECURITY.md   # lines 274, 275
+grep -n OPENCODE_SERVER_PASSWORD SECURITY.md README.md README.en.md scripts/export-state.sh       # SECURITY 113/323/328/344/467; README 116/176/195; README.en 126/185/204; export-state 29/32
+grep -rniE "solo lo alcanza quien este en la red|puede manejar opencode|can drive opencode|reachable from the host|alcanzable desde el host" README.md README.en.md SECURITY.md   # no output (exit 1)
+grep -rniE "sin credencial|no github credential|no tiene token|no esta instalado" SECURITY.md   # no output (exit 1)
+# --- AC9 stale-claim greps (docs set) after the rewrite ---
+grep -rn "http://opencode:4096" README.md README.en.md SECURITY.md hermes/ scripts/             # no output (exit 1)
+grep -rniE "dos agentes|dos contenedores|two agent containers|two containers|sibling container|contenedor hermano" README.md README.en.md SECURITY.md hermes/ scripts/   # no output (exit 1)
+grep -rn "docker compose exec opencode" README.md README.en.md SECURITY.md scripts/ hermes/ .env.example   # no output (exit 1)
+grep -rn "docker inspect hermes\|docker inspect opencode" README.md README.en.md SECURITY.md .env.example   # no output (exit 1)
+grep -rniE "claves? (estan |están )?aislad|keys? are isolated|aisladas por proceso|isolated per process|no puede leer la clave del otro|cannot read the other" README.md README.en.md SECURITY.md hermes/   # no output (exit 1)
+# --- task 44 corrected check ---
+git ls-files scripts/fix-permissions.ps1                                # no output (the file is deleted)
+# --- appended-artifact re-read ---
+grep -c '^- \[x\]' openspec/changes/single-robotina-container/tasks.md  # 33
+grep -c '^- \[ \]' openspec/changes/single-robotina-container/tasks.md  # 12
+# --- CR4 authoring-rule check over the changed docs ---
+git grep -nE "docker compose confi[g]" -- README.md README.en.md SECURITY.md scripts/ openspec/changes/single-robotina-container/design.md openspec/changes/single-robotina-container/tasks.md | grep -vE "config [-]{1,2}(q|services|format)"   # no output (exit 1)
+```
+
+Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
+same line; the bare `docker compose config` form was never run and is never written here. No token
+or key value was ever printed.
