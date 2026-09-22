@@ -241,9 +241,15 @@ RUN set -eux; \
 # Todo el contexto de build entra en un unico COPY y un RUN lo instala en sus
 # rutas definitivas. Se hace asi (y no con un `COPY s6/` literal) porque el
 # arbol s6 lo entrega el slice de supervision: con COPY por directorio el build
-# de este slice no resolveria. El bloque del arbol s6 es condicional: cuando el
-# arbol exista, se instala y se valida; mientras no exista, no hay nada que
-# instalar y el paso lo dice explicitamente.
+# se acoplaria al layout del contexto.
+#
+# Desde el slice 04 el arbol EXISTE, asi que la validacion dejo de ser
+# condicional: un arbol s6 ausente o mal formado ahora falla el build, en vez de
+# hornear una imagen que arrancaria sin opencode ni engram supervisados. Se
+# assertea lo que el design §5.5 exige: `type` con el valor esperado, el script
+# del servicio (`run` para longrun, `up` para oneshot) presente, ejecutable y
+# con `sh -n` limpio, el `finish` de ambos longruns, las aristas de
+# `dependencies.d` de §5.1 y las cuatro entradas del bundle `user2`.
 COPY . /opt/robotina-src/
 RUN set -eux; \
     install -d /opt/robotina; \
@@ -252,29 +258,41 @@ RUN set -eux; \
     install -m 0755 /opt/robotina-src/healthcheck.sh /opt/robotina/healthcheck.sh; \
     sh -n /opt/robotina/opencode-init.sh; \
     sh -n /opt/robotina/healthcheck.sh; \
-    if [ -d /opt/robotina-src/s6/cont-init.d ]; then \
-      for f in /opt/robotina-src/s6/cont-init.d/*; do \
-        [ -f "$f" ] || continue; \
-        sh -n "$f"; \
-        install -m 0755 "$f" "/etc/cont-init.d/$(basename "$f")"; \
-      done; \
-      echo "robotina: cont-init.d propio instalado"; \
-    fi; \
-    if [ -d /opt/robotina-src/s6/s6-rc.d ]; then \
-      cp -a /opt/robotina-src/s6/s6-rc.d/. /etc/s6-overlay/s6-rc.d/; \
-      for d in /opt/robotina-src/s6/s6-rc.d/*/; do \
-        n="$(basename "$d")"; \
-        if [ "$n" = "user2" ]; then continue; fi; \
-        t="$(cat "$d/type")"; \
-        case "$t" in \
-          longrun) s="$d/run" ;; \
-          oneshot) s="$d/up" ;; \
-          *) echo "robotina: type invalido en $n: $t" >&2; exit 1 ;; \
-        esac; \
-        test -f "$s"; chmod 0755 "$s"; sh -n "$s"; \
-      done; \
-      echo "robotina: arbol s6 propio instalado y validado"; \
-    fi
+    test -d /opt/robotina-src/s6/cont-init.d; \
+    for f in /opt/robotina-src/s6/cont-init.d/*; do \
+      [ -f "$f" ] || continue; \
+      sh -n "$f"; \
+      install -m 0755 "$f" "/etc/cont-init.d/$(basename "$f")"; \
+    done; \
+    echo "robotina: cont-init.d propio instalado"; \
+    src=/opt/robotina-src/s6/s6-rc.d; \
+    test -d "$src"; \
+    cp -a "$src/." /etc/s6-overlay/s6-rc.d/; \
+    for edge in \
+      opencode-init/dependencies.d/base \
+      engram/dependencies.d/base engram/dependencies.d/opencode-init \
+      opencode/dependencies.d/base opencode/dependencies.d/opencode-init opencode/dependencies.d/engram \
+      opencode-ready/dependencies.d/opencode; do \
+      test -f "$src/$edge" || { echo "robotina: falta la dependencia $edge" >&2; exit 1; }; \
+    done; \
+    for c in opencode-init engram opencode opencode-ready; do \
+      test -f "$src/user2/contents.d/$c" || { echo "robotina: falta la entrada user2/$c" >&2; exit 1; }; \
+    done; \
+    dst=/etc/s6-overlay/s6-rc.d; \
+    for d in "$src"/*/; do \
+      n="$(basename "$d")"; \
+      if [ "$n" = "user2" ]; then continue; fi; \
+      t="$(cat "$dst/$n/type")"; \
+      case "$t" in \
+        longrun) s="$n/run"; f="$n/finish" ;; \
+        oneshot) s="$n/up"; f="" ;; \
+        *) echo "robotina: type invalido en $n: $t" >&2; exit 1 ;; \
+      esac; \
+      test -f "$dst/$s"; chmod 0755 "$dst/$s"; test -x "$dst/$s"; sh -n "$dst/$s"; \
+      if [ -n "$f" ]; then test -f "$dst/$f"; chmod 0755 "$dst/$f"; test -x "$dst/$f"; sh -n "$dst/$f"; fi; \
+      echo "robotina: servicio $n ($t) validado"; \
+    done; \
+    echo "robotina: arbol s6 propio instalado y validado"
 
 # --- 12. aserciones finales ---------------------------------------------------
 # La suite de verificacion del cambio (39 requisitos) asume TODO este

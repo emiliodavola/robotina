@@ -1,0 +1,67 @@
+#!/command/with-contenv sh
+# =============================================================================
+# cont-init de robotina: deja el arbol de estado listo para el uid de la app.
+#
+# Corre como root y DESPUES de los hooks del vendor. s6-overlay ejecuta
+# /etc/cont-init.d/* en orden lexicografico, asi que el orden real es:
+#   01-hermes-setup -> 015-supervise-perms -> 02-reconcile-profiles -> ESTE.
+# El prefijo 10 lo garantiza: cualquier hook propio que se agregue despues debe
+# usar un numero mayor.
+#
+# Por que existe: reemplaza el paso manual del host, que corria una imagen
+# alpine:latest SIN pin como root con la carpeta de estado del host montada para
+# hacer chown a mano. Ahora lo hace el propio contenedor, en cada arranque y
+# antes de que s6-rc levante los servicios de usuario. Es la unica forma de que
+# una carpeta de estado recien creada en el host quede escribible por el uid de
+# la app SIN un paso privilegiado del host (SL6).
+#
+# No toca el arbol s6, ni los archivos del vendor, ni la politica de egreso:
+# solo directorios y ownership. Es idempotente.
+# =============================================================================
+set -eu
+
+# El uid/gid se derivan del usuario `hermes` en runtime, nunca se hardcodean: si
+# alguien define HERMES_UID/PUID, el remap del vendor corre ANTES que este script
+# y la derivacion sigue siendo la correcta.
+uid="$(id -u hermes)"
+gid="$(id -g hermes)"
+
+# --- 1. Directorios de estado que la app espera encontrar --------------------
+# `install -d` es idempotente y crea los padres que falten. No se listan los dos
+# volumenes anidados (.engram y .local/share/opencode): ya existen como monturas
+# y su punto de montaje no se pisa desde aca.
+install -d -o "$uid" -g "$gid" \
+  /opt/data/.config/opencode \
+  /opt/data/.config/git \
+  /opt/data/go \
+  /opt/data/logs \
+  /workspace \
+  /backups
+
+# --- 2. Autocuracion: que el uid de la app pueda escribir la raiz ------------
+# Barato cuando ya esta bien (un solo test). Si el bind del host llega con otro
+# dueno — el caso tipico de una carpeta nueva en Windows — se re-owna el arbol.
+#
+# `find -prune` sobre las CUATRO monturas que cuelgan de /opt/data (/opt/data/skins
+# y /opt/data/skills/stack son bind read-only; los dos volumenes se re-ownan
+# aparte en el paso 3) evita cruzar hacia otro filesystem: un chown recursivo que
+# atravesara una montura read-only fallaria y abortaria el arranque. NO se usa
+# `chown --one-file-system` porque el chown de coreutils no tiene esa opcion
+# (medido: no aparece en --help).
+if ! s6-setuidgid hermes test -w /opt/data; then
+  echo "robotina: /opt/data no es escribible por uid $uid; re-ownando (sin cruzar monturas)" >&2
+  find /opt/data \
+    \( -path /opt/data/skins \
+       -o -path /opt/data/skills/stack \
+       -o -path /opt/data/.engram \
+       -o -path /opt/data/.local/share/opencode \) -prune -o \
+    -exec chown "$uid:$gid" {} +
+fi
+
+# --- 3. Dueno explicito y acotado de las dos raices de volumen ---------------
+# El paso 2 las salteo a proposito (son otro filesystem). Se re-ownan aca,
+# recursivo pero acotado a dos directorios, para que las bases SQLite en modo WAL
+# queden escribibles por el uid de la app.
+chown -R "$uid:$gid" /opt/data/.engram /opt/data/.local/share/opencode
+
+echo "robotina: estado listo (uid=$uid gid=$gid)"

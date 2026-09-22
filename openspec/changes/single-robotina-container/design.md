@@ -476,6 +476,23 @@ export` with a default data dir would silently export an empty store.
    ownership. The specs' numeric proofs assume the default 10000; that assumption is stated in
    the docs (§17).
 
+> **AMENDMENT A1 — apply-observed (slice 04, tasks 10–12).** Step 2's literal
+> `chown -R 10000:10000 /opt/data` cannot be implemented as written once the full mount table is
+> considered: `compose.yml` also mounts **two read-only binds under `/opt/data`** —
+> `/opt/data/skins` (from `./hermes/skins`) and `/opt/data/skills/stack` (from `./hermes/skills`).
+> A recursive chown that descends into them fails with `Read-only file system`; under `set -e`
+> that aborts `cont-init` and the container start. `chown` additionally has **no
+> `--one-file-system` option** (measured in the image: absent from `chown --help`). The
+> implemented mechanism is therefore
+> `find /opt/data \( -path /opt/data/skins -o -path /opt/data/skills/stack
+> -o -path /opt/data/.engram -o -path /opt/data/.local/share/opencode \) -prune -o
+> -exec chown "$uid:$gid" {} +`, with `uid`/`gid` derived from `id -u/-g hermes` (step 4).
+> The observable is unchanged: a freshly created host state tree becomes writable by the
+> application uid with no host-side privileged step (SL6), and the two read-only binds are left
+> untouched. Step 3's bounded chown on the two volume roots is unchanged. Proven in-image against
+> real read-only mounts (script exit 0; writable state dirs `10000:10000`; read-only mounts
+> `0:0`); see `apply-progress.md` slice 04, deviation D2/D4.
+
 ### 8.2 Why this replaces the host step
 
 Today's mandatory host step runs **unpinned `alpine:latest` as root with the host state bind

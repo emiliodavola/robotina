@@ -217,7 +217,7 @@ inferred.
 
 ## Phase 3 — s6 supervision tree
 
-- [ ] 10. Author `robotina/s6/cont-init.d/10-robotina-state` (runs as root, after the vendor
+- [x] 10. Author `robotina/s6/cont-init.d/10-robotina-state` (runs as root, after the vendor
   `01-hermes-setup`): `install -d -o 10000 -g 10000` for the state directories, the
   self-heal `chown -R` on `/opt/data` only when the app uid cannot write it, an explicit
   bounded `chown -R` on the two nested volume roots, and uid derivation from `id -u hermes`.
@@ -226,7 +226,7 @@ inferred.
   - Verify: `docker compose build robotina` (exit 0); the behavioural proof is task 22's SL6
     write test.
 
-- [ ] 11. Author the `opencode` and `engram` longruns: `type`, `run` (both
+- [x] 11. Author the `opencode` and `engram` longruns: `type`, `run` (both
   `#!/command/with-contenv`, `HOME=/opt/data`, `XDG_*` scoped to the opencode process, the key
   rewritten into the vendor name and the robotina-named copy unset, `cd /workspace`,
   `exec s6-setuidgid hermes …`, no secret in any banner), `dependencies.d/*` per design §5.1,
@@ -236,7 +236,7 @@ inferred.
   - Verify: `docker compose build robotina` (exit 0 — the build asserts `type`, script
     presence, executability, `sh -n` and the dependency files).
 
-- [ ] 12. Author the `opencode-init` and `opencode-ready` oneshots (`opencode-ready` polls the
+- [x] 12. Author the `opencode-init` and `opencode-ready` oneshots (`opencode-ready` polls the
   credential-aware loopback health endpoint with the 120 s bound) and register all four names
   under `robotina/s6/s6-rc.d/user2/contents.d/`. Spanish comments.
   Files: `robotina/s6/s6-rc.d/{opencode-init,opencode-ready}/**`,

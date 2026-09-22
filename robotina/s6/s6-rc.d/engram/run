@@ -1,0 +1,21 @@
+#!/command/with-contenv sh
+# Servicio longrun `engram`: el servidor de memoria del agente.
+#
+# La salida va al log del contenedor via s6. El redirect viejo
+# (`engram serve > /var/log/engram.log`) fallaba en silencio: /var/log es de root
+# y el escritor es uid 10000. El stream de log ya queda acotado por la rotacion
+# json-file del ancla de hardening, no necesita ruta escribible y lo captura el
+# ciclo de vida unico.
+set -eu
+
+export HOME=/opt/data ENGRAM_DATA_DIR=/opt/data/.engram
+
+# Medido en la imagen: `engram serve` acepta un puerto posicional opcional y
+# escucha en 127.0.0.1:7437 por defecto. NO acepta flag de host, asi que el bind
+# loopback ya es el correcto y no hay nada que forzar aca.
+echo "robotina: engram serve (data dir $ENGRAM_DATA_DIR)" >&2
+
+# Marca de arranque para el reset del backoff del `finish` (ver opencode/run).
+st=/tmp/robotina; mkdir -p "$st"; date +%s > "$st/engram.start"
+
+exec s6-setuidgid hermes engram serve
