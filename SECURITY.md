@@ -42,18 +42,22 @@ Por eso `robotina` **no** lleva `init: true`: PID 1 debe ser la cadena de entrad
 imagen para que s6 supervise los servicios. `docker compose exec robotina sh -c
 'tr "\0" " " < /proc/1/cmdline'` debe mostrar la cadena de s6 y **no** `tini`/`docker-init`.
 
-**2. s6 necesita cinco capabilities.** El contenedor arranca como root y baja privilegios
-con `s6-setuidgid hermes`, además de ajustar el dueño del volumen. Con `cap_drop: [ALL]` a
-secas el arranque muere:
+**2. s6 necesita seis capabilities.** El contenedor arranca como root y baja privilegios
+con `s6-setuidgid hermes`, además de ajustar el dueño del volumen y de poder señalar a sus
+hijos de uid 10000 para bajarlos. Con `cap_drop: [ALL]` a secas el arranque muere:
 
 ```text
 s6-applyuidgid: fatal: unable to set supplementary group list: Operation not permitted
 ```
 
-De ahí `cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]`. Con eso, s6 arranca completo
-(preinit → `s6-rc` → `cont-init` → stage2). El proceso `opencode serve` (uid 10000) **no**
-conserva esas capabilities: la evidencia medida de sus máscaras de capacidad se registra en la
-sección de evidencia medida, no acá.
+De ahí `cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]`, que da una máscara de
+bounding set `0xeb`. Las cinco primeras hacen que s6 arranque completo (preinit → `s6-rc` →
+`cont-init` → stage2); `KILL` se agregó después de medir que, sin ella, un apagado iniciado
+adentro del contenedor se traba (ver «Apagado y ciclo de vida», más abajo). El proceso
+`opencode serve` (uid 10000) **no** conserva ninguna: medido en el contenedor que corre,
+`CapEff=0x0`, `CapPrm=0x0`, `CapAmb=0x0`, `CapBnd=0xeb`, `NoNewPrivs: 1`. No puede ganar
+`KILL` ni ninguna otra capability, así que readmitirla en el contenedor no amplía lo que el
+agente puede hacer.
 
 **3. La imagen no acepta `user:` arbitrario.** Aborta a propósito si la arrancás con un UID
 que no sea root ni `hermes`:
@@ -64,6 +68,29 @@ ERROR: container started with --user 1000 (an arbitrary, non-hermes UID) — not
 
 Para que los archivos queden con tu UID del host, la vía soportada es mantener root en el
 arranque y pasar `HERMES_UID` / `HERMES_GID` (o `PUID`/`PGID`). No uses `user:`.
+
+## Apagado y ciclo de vida (medido)
+
+El contenedor tiene **un solo ciclo de vida**, y su PID 1 es el **árbol de supervisión de s6**,
+no Hermes. Medido en el contenedor que corre:
+
+- `hermes gateway run` es el servicio **`gateway-default`** de s6 (`s6-supervise gateway-default`).
+  Si el gateway muere, s6 lo **reinicia en el lugar**: el pid del gateway cambia y el contenedor
+  sigue arriba, con `RestartCount` y `StartedAt` **sin cambios**. El propio gateway lo confirma
+  en su log: `gateway is now running under s6 supervision (auto-restart on crash …)`.
+- El contenedor **sale cuando baja el árbol de supervisión** (un `docker compose stop robotina`,
+  o un `kill` de PID 1), y `restart: unless-stopped` vuelve a levantar la unidad completa.
+- El apagado es **ordenado**: con `KILL` en el capability set, `docker compose stop robotina`
+  termina en **5.50 s** (muy adentro de los `stop_grace_period: 20s`), con `ExitCode=0` y **sin**
+  `SIGKILL` de Docker. El log muestra el árbol bajando servicio por servicio
+  (`opencode-ready` → `opencode` → `main-hermes` → `dashboard` → `engram` → `opencode-init` →
+  `legacy-cont-init` → `fix-attrs`, todos `successfully stopped`) y el gateway recibiendo
+  `SIGTERM`.
+
+Antes de agregar `KILL`, ese mismo apagado **se trababa**: los supervisores root no podían
+señalar a los servicios de uid 10000, `s6-rc` nunca terminaba de bajar el árbol, PID 1 no salía
+y Docker terminaba mandando `SIGKILL` pasado el grace period. Ese es el motivo de la sexta
+capability.
 
 ## El transporte de Telegram sí pasa por el proxy
 
@@ -287,11 +314,22 @@ segundo: no es cierto a igual uid.
 
 ### R4 — Ciclo de vida único
 
-El contenedor tiene **un solo ciclo de vida**. PID 1 es la cadena de entrada de la imagen
-(s6-overlay) y el programa principal es Hermes; `opencode` y `engram` son servicios supervisados
-por s6 que **no sobreviven por su cuenta**. Si el programa principal de Hermes muere, el
-contenedor se reinicia como una unidad (`restart: unless-stopped`): los tres procesos vuelven
-juntos o no vuelven. Ya no hay forma de reiniciar OpenCode sin tocar a Hermes, ni al revés.
+El contenedor tiene **un solo ciclo de vida**, compartido por todos los procesos de adentro.
+PID 1 es el **árbol de supervisión de s6** (no Hermes); `opencode`, `engram` y el propio gateway
+(`gateway-default`) son servicios supervisados por s6. A nivel **servicio** la recuperación es
+independiente: si un servicio muere, s6 lo reinicia en el lugar y los demás siguen. A nivel
+**contenedor**, en cambio, no hay dos dominios de falla: todo lo que baja PID 1 —un
+`docker compose stop`, un `kill` de PID 1, el agotamiento del cgroup compartido (R5) o un reset
+del daemon— se lleva a todos los procesos juntos y los vuelve a levantar juntos
+(`restart: unless-stopped`).
+
+La afirmación original de esta sección —«si el programa principal de Hermes muere, el
+contenedor se reinicia y se lleva a opencode y engram»— **era falsa y quedó corregida por
+medición**: `hermes gateway run` es el servicio s6 `gateway-default`, así que un crash del
+gateway lo reinicia s6 **en el lugar** y el contenedor sigue corriendo (`RestartCount` y
+`StartedAt` sin cambios). Lo que se acepta, entonces, no es «un ciclo de vida que sigue a
+Hermes» sino **un ciclo de vida de contenedor compartido**: los agentes viven y mueren con el
+contenedor, no con el gateway. El detalle medido está en «Apagado y ciclo de vida».
 
 ### R6 — El documento de tareas de interoperación queda superseded
 

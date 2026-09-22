@@ -1928,3 +1928,183 @@ Every static-validation invocation in this section carries `-q`, `--services` or
 same line; the bare `docker compose config` form was never run and is never written here. No token
 or key value was ever printed.
 
+---
+
+# Slice 10 — `feat/single-robotina-container-10-capkill` (defect fix + contract amendment, task 28)
+
+Appended to the cumulative body above. Nothing above was modified. This slice **fixes the defect
+slice 09 exposed** and **amends every artifact that stated something the measurements proved
+false**. It is the only slice so far that changes a frozen design decision, so the amendment is
+explicit in `design.md` §13.3, spec `agent-container` AC4/AC8 and proposal R4.
+
+## Structured status consumed
+
+- Native `gentle-ai.sdd-status` v2 provided by the parent: `changeName: single-robotina-container`,
+  `artifactStore: openspec`, `nextRecommended: apply`, `applyState: ready`, `dependencies.apply:
+  ready`, `taskProgress: 36/45 complete, 9 pending`, `blockedReasons: []`, `notes: []`.
+- `actionContext`: `mode: repo-local`, `workspaceRoot: C:\Users\elaze\Desktop\robotina`,
+  `allowedEditRoots: ["C:\Users\elaze\Desktop\robotina"]`. **No actionContext warnings** raised
+  by the status engine. Apply-observed findings are recorded below (F1–F5).
+- Review-workload gate: the parent prompt carries the resolved delivery path — chained PRs,
+  `feature-branch-chain`, tracker `feat/single-robotina-container`, current slice branch
+  `feat/single-robotina-container-10-capkill`, `exception-ok` accepted per slice (~650 authored
+  lines, user decision). This slice implements **task 28 only**; tasks 26, 38, 40, 41 and 42–45
+  were explicitly out of scope and were not started.
+- `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`, `test_command: null`; the
+  parent prompt did not activate strict TDD.
+- No child subagent was launched. No `git commit`/`git push`/PR was performed — the parent owns the
+  index and delivery. No token or key value was ever printed; key-touching probes used `sha256sum`
+  only. The stack was left **healthy and running** (explicitly required).
+
+## Completed task (37/45 cumulative, 1/1 of this slice) and its persisted checkbox update
+
+`openspec/changes/single-robotina-container/tasks.md` was re-read after editing: **37 checked**
+(`grep -c '^- \[x\]'`), **8 pending** (`grep -c '^- \[ \]'`). **Task 28 is now `- [x]`** — its
+proof text was rewritten to the corrected contract *and* its verification was actually run and
+observed before the checkbox was flipped.
+
+| Task | What was done | Verification actually run | Observed result |
+| --- | --- | --- | --- |
+| 28 | Defect resolved: `KILL` added to `cap_add` (six capabilities, mask `0xeb`); lifecycle contract corrected; task proof rewritten | `docker compose config -q`; `docker compose up -d --force-recreate robotina`; PID-1 and uid-10000 mask probes; `docker compose stop robotina` timed; `pkill -f "[o]pencode serve"` + bounded credential-aware probe; `pkill -f "[h]ermes gateway"` as uid 10000 + `RestartCount`/`StartedAt` watch; `s6-rc -a list`; Telegram log grep | config exit 0; PID 1 `CapEff=CapBnd=0xeb`; opencode (uid 10000) `CapEff=0x0`, `CapBnd=0xeb`; stop **5.50 s**, `ExitCode=0`, no SIGKILL; recovery **4.37 s** without manual step (pid 211→416); gateway restarted in place (pid 188→506) with `RestartCount=0`/`StartedAt` unchanged; 10 s6 services; Telegram connected |
+
+## TDD Cycle Evidence
+
+**Not applicable.** `openspec/config.yaml` → `strict_tdd: false`, `testing.runner: none`,
+`test_command: null`; the parent prompt did not activate strict TDD. Verification is the shell-level
+runtime suite below; no test runner exists and none may be invented.
+
+## Files changed in this slice (authored line counts)
+
+`git diff --numstat` (additions / deletions) at the time of writing, excluding this file:
+
+| File | Change | Additions | Deletions | Authored |
+| --- | --- | --- | --- | --- |
+| `compose.yml` | `KILL` added to `cap_add`; Spanish comment records why (s6 must signal uid-10000 children; app uid keeps `CapEff=0x0`; mask `0xeb`) | 10 | 2 | 12 |
+| `openspec/…/specs/agent-container/spec.md` | AC4 six-capability requirement + mask `0xeb`; AC8 lifecycle scenario rewritten; both with AMENDMENT notes | 50 | 21 | 71 |
+| `openspec/…/design.md` | §6 single-lifecycle corrected; §13 Q4/table/§14 mask; §15/§17 rows; new §13.3 amendment; §19.1 RESOLVED | 81 | 18 | 99 |
+| `openspec/…/proposal.md` | R4 corrected (plus A4/R3 rows and the §3.1/§4.3/§4.5/phase-result claims that repeated the same falsehood) | 18 | 9 | 27 |
+| `SECURITY.md` | R4 corrected; capability entry six + measured `CapEff=0x0`; new measured «Apagado y ciclo de vida» section | 50 | 12 | 62 |
+| `odd/tasks/single-robotina-container.md` | task-28 header + new «Slice 10» evidence section + `## Next step` rewrite | 92 | 8 | 100 |
+| `openspec/…/tasks.md` | task 28 proof rewritten, defect + resolution recorded, `- [ ]` → `- [x]`, task 25 expectation updated, slice-10 note | 37 | 10 | 47 |
+| **Subtotal (excluding this file)** | | **338** | **80** | **418** |
+
+- **Implementation-only authored changed lines: 12** (`compose.yml`). The rest is the honest
+  amendment of the artifacts the measurement proved wrong plus the change record. Nothing was
+  compressed or deleted to fit the budget, and no comment/doc/evidence line was removed.
+- `git status --porcelain` for the slice: ` M SECURITY.md`, ` M compose.yml`,
+  ` M odd/tasks/single-robotina-container.md`, ` M openspec/…/design.md`,
+  ` M openspec/…/proposal.md`, ` M openspec/…/specs/agent-container/spec.md`,
+  ` M openspec/…/tasks.md`, ` M openspec/…/apply-progress.md` (this file).
+
+## Deviations from task text / design
+
+1. **The design decision was amended, not silently absorbed.** `design.md` §13.3 is the single
+   place where `apply` changed a frozen decision (five → six capabilities; container-CMD lifecycle
+   → s6-supervised gateway). Both were user decisions taken in this slice and both are recorded
+   as amendments in the design, the spec and the proposal.
+2. **Task 28's kill can now run as root.** With `CAP_KILL` present, the literal
+   `docker compose exec robotina sh -c 'pkill -f "[o]pencode serve"'` succeeds (exit 0), so the
+   slice-09 workaround (`-u hermes`) is no longer needed for the opencode half. The gateway half
+   was still run as uid 10000 (`-u hermes`) because the task's corrected proof says so, and because
+   that is the faithful "kill the process inside the container" realization; root would also work
+   now, but the spec recipe is uid-10000 and was kept executable as written.
+3. **The slice-09 "AC8 amendment" was itself wrong and is superseded.** Slice 09 proposed
+   asserting a unit restart (`RestartCount`/`StartedAt` move). Measured: `gateway-default` is an
+   s6 service, so the counter never moves. The corrected AC8 asserts the opposite observation
+   (restart in place, counter unchanged). `design.md` §19.1 carries the RESOLVED note.
+4. **No `README.md`/`README.en.md` edit was made** — they are outside this slice's allowed edit
+   surfaces, though they carry the stale claim (F1).
+
+## Findings for the parent (not fixed here)
+
+- **F1 (open — must be fixed before `verify`/`archive`).** `README.md` (~line 345) and
+  `README.en.md` (~line 358) still claim "if the main program goes down, the container goes with
+  it". The measured contract contradicts it. Both files are outside this slice's allowed edit
+  surfaces, so they were not touched.
+- **F2 (open, decision).** `explore.md` (~lines 101, 257–263, 574, 641) records the same
+  pre-measurement assumption. It is a frozen phase artifact; correcting it (or adding a note) is a
+  parent decision, not an apply edit.
+- **F3 (resolved).** Slice-09 F1/F2 (AC8 fails; shutdown non-graceful) are closed by this slice.
+- **F4 (record for task 40).** Task 40 must now fold in the **six-capability** masks, the **5.50 s**
+  stop and the slice-09 gate-failure observation. The old five-capability/`0xcb` wording is stale.
+- **F5 (observation, not a defect).** The `--force-recreate` kills the previous gateway, which then
+  logs `Previous gateway life … exited UNCLEANLY` on the next boot. Expected for a forced recreate;
+  do not mistake it for a crash.
+
+## Remaining tasks (8) — exact unchecked lines from the persisted artifact
+
+```text
+- [ ] 26. **[measurement-dependent]** Sample the merged cgroup's `pids.current` baseline and
+- [ ] 38. **[measurement-dependent]** Apply design §16's pre-committed adjustment rule to the
+- [ ] 40. **[measurement-dependent]** Add `SECURITY.md`'s measured evidence entries: R3's
+- [ ] 41. Finalize the change record: replace the ODD file's `## Verification evidence`
+- [ ] 42. Run the verification suite end to end on the final tree and record the result.
+- [ ] 43. Confirm the frozen egress boundary and the mandatory-input guard survived the merge.
+- [ ] 44. Confirm the rollback path is intact: both state volume names unchanged, the three
+- [ ] 45. Final secret-leak audit over the whole change, including this file.
+```
+
+## Workload / PR boundary
+
+- **Slice budget vs actual:** implementation delta **12 authored lines** (`compose.yml`); the whole
+  slice is **418 authored changed lines** excluding this section, inside the accepted per-slice
+  `size:exception` (~650). No re-slicing needed and no `size:exception` is newly requested.
+- **PR boundary:** this slice contains exactly `compose.yml`, `SECURITY.md`,
+  `odd/tasks/single-robotina-container.md`, `openspec/…/specs/agent-container/spec.md`,
+  `openspec/…/design.md`, `openspec/…/proposal.md`, `openspec/…/tasks.md` and this
+  `apply-progress.md`, on branch `feat/single-robotina-container-10-capkill`. Targeted at the
+  tracker branch `feat/single-robotina-container` under `feature-branch-chain`. The measurement
+  slice (26, 38, 40, 41) and the final audit (42–45) are **not** started.
+- No `git commit`, `git push` or PR was created — the parent owns delivery and the index.
+
+## Verification commands run in this slice (exhaustive, with observed output)
+
+```text
+# --- artifact validation + recreate ---
+docker compose config -q                                                              # exit 0
+docker compose up -d --force-recreate robotina                                         # Recreated / Started
+
+# --- masks (AC4 amended) ---
+docker compose exec -T robotina sh -c 'grep -E "^(Uid|Gid)|Cap(Inh|Prm|Eff|Bnd|Amb)|NoNewPrivs" /proc/1/status'
+# Uid: 0 0 0 0 / Gid: 0 0 0 0 / CapInh 0x0 / CapPrm 0xeb / CapEff 0xeb / CapBnd 0xeb / CapAmb 0x0 / NoNewPrivs 1
+docker compose exec -T robotina sh -c 'for p in $(pgrep -f "[o]pencode serve"); do echo "pid=$p uid=$(awk "/^Uid/{print \$2}" /proc/$p/status)"; grep -E "Cap(Inh|Prm|Eff|Bnd|Amb)|NoNewPrivs" /proc/$p/status; done'
+# pid=213 uid=10000 / CapInh 0x0 / CapPrm 0x0 / CapEff 0x0 / CapBnd 0xeb / CapAmb 0x0 / NoNewPrivs 1
+# re-checked after the recovery kill: pid=416 uid=10000 CapEff=0x0 CapBnd=0xeb NoNewPrivs=1
+
+# --- graceful shutdown (AC8 amended / slice-09 F2) ---
+start=$(date +%s%N); docker compose stop robotina; end=$(date +%s%N)
+# Stopping / Stopped ; stop_duration_ms=5504 -> 5.50 s
+docker inspect --format 'ExitCode={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}} FinishedAt={{.State.FinishedAt}}' robotina
+# ExitCode=0 OOMKilled=false FinishedAt=2026-09-22T19:25:47.360681404Z
+docker compose logs --tail 40 robotina | grep -iE 's6-rc|successfully stopped|SIGTERM'
+# opencode-ready -> opencode -> main-hermes -> dashboard -> engram -> opencode-init -> legacy-cont-init -> fix-attrs, all successfully stopped; gateway Shutdown context: signal=SIGTERM
+
+# --- task 28 recovery proof (AC5) ---
+docker compose up -d robotina                                                            # Started; health=healthy
+docker compose exec -T robotina sh -c 'pgrep -f "[o]pencode serve" | head -1'           # 211
+docker compose exec -T robotina sh -c 'pkill -f "[o]pencode serve"'                    # exit 0 (root now has CAP_KILL)
+docker compose exec -T robotina sh -c '<bounded credential-aware probe 30x2s>'          # exit 0 in 4.37 s
+docker compose exec -T robotina sh -c 'pgrep -f "[o]pencode serve" | head -1'           # 416
+docker compose logs --since 2m robotina | grep -E 'salio|reinicio'                       # opencode salio (exit=256 sig=15); reinicio #1 en 1s
+
+# --- corrected lifecycle contract (AC8 amended) ---
+docker compose exec -T robotina sh -c 'pgrep -f "[h]ermes gateway" | head -1'           # 188
+docker inspect --format '{{.RestartCount}} {{.State.StartedAt}}' robotina                # 0 2026-09-22T19:26:33.780458019Z
+docker compose exec -u hermes -T robotina sh -c 'pkill -f "[h]ermes gateway"'          # exit 0
+sleep 20
+docker compose exec -T robotina sh -c 'pgrep -f "[h]ermes gateway" | head -1'           # 506  (new, non-empty)
+docker inspect --format '{{.RestartCount}} {{.State.StartedAt}}' robotina                # 0 2026-09-22T19:26:33.780458019Z  (unchanged)
+# GATEWAY_RESTARTED_IN_PLACE=yes ; CONTAINER_NOT_CYCLED=yes
+docker compose logs --since 1m robotina | grep -i 's6 supervision'                       # gateway is now running under s6 supervision (auto-restart on crash ...)
+
+# --- final stack state ---
+docker compose ps --format 'table {{.Name}}\t{{.Status}}\t{{.Ports}}'                   # egress-proxy Up (healthy) 3128/tcp ; robotina Up (healthy)
+docker compose exec -T robotina sh -c '<credential-aware /global/health>'                # {"healthy":true,"version":"1.18.32"}
+docker compose exec -T robotina /command/s6-rc -a list | wc -l                           # 10
+docker compose logs --since 5m robotina | grep -i 'Connected to Telegram'                # [Telegram] Connected to Telegram (polling mode)
+```
+
+Every static-validation invocation in this section carries `-q`, `--services` or `--format` on the
+same line; the bare `docker compose config` form was never run and is never written here. No token
+or key value was ever printed.
+

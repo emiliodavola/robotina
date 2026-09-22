@@ -95,7 +95,7 @@ evidence below (checkboxes flipped in this file).
 | 20 | peer probes + network membership | control `egress-proxy:3128` = 400; `robotina:4096` connection refused (exit 7); `egress-proxy` `/dev/tcp` refused; `agents`={egress-proxy,robotina}, `egress`={egress-proxy} |
 | 23 | process key hashes; vendor-patch grep; log secret grep; `GITHUB_TOKEN` | opencode `286c7a04…`, hermes `06c38c58…` → **differ**; both match the exported shell env; vendor-patch grep empty; log secret grep empty; `GITHUB_TOKEN` present |
 | 24 | nested mounts; negative control; durability; volume names | 2 `ext4` mounts (not 9p/virtiofs); marker in the volume **absent** from the host bind; marker survived `down`/`up`; 2 volumes |
-| 25 | `CapEff`/`CapBnd`/`NoNewPrivs` of the uid-10000 `opencode serve` | `CapInh/Prm/Eff/Amb = 0x0`, `CapBnd = 0x00000000000000cb`, `NoNewPrivs: 1` — matches design §13 |
+| 25 | `CapEff`/`CapBnd`/`NoNewPrivs` of the uid-10000 `opencode serve` | `CapInh/Prm/Eff/Amb = 0x0`, `CapBnd = 0x00000000000000cb`, `NoNewPrivs: 1` — matched design §13 **before the task-28 amendment**; after it (slice 10) the mask is `CapBnd = 0xeb`, `CapEff = 0x0` (see §13.3) |
 
 **Deferred and reported, not closed:** task 21 (3× recreation loop + gate-failure observation),
 task 22 (identity layers — tasks 13–16 not implemented), task 26 (peak `pids.current` under the
@@ -466,8 +466,10 @@ inferred.
   Files: `odd/tasks/single-robotina-container.md`. Depends on: task 18.
   - Verify: `docker compose exec robotina sh -c 'for p in $(pgrep -f "[o]pencode serve"); do echo "pid=$p uid=$(awk "/^Uid/{print \$2}" /proc/$p/status)"; grep -E "Cap(Inh|Prm|Eff|Bnd|Amb)|NoNewPrivs" /proc/$p/status; done'`
     (at least one `pid=` line — an empty match is a FAILURE).
-    Expected `CapBnd = 0x00000000000000cb`, `CapEff`/`CapPrm`/`CapAmb = 0x0`, `NoNewPrivs: 1`.
-    **If `CapEff != 0`:** write the measured masks and the decode against the five-capability
+    Expected after the task-28 amendment: `CapBnd = 0x00000000000000eb`,
+    `CapEff`/`CapPrm`/`CapAmb = 0x0`, `NoNewPrivs: 1` (the pre-amendment measurement was `0xcb`;
+    see `design.md` §13.3).
+    **If `CapEff != 0`:** write the measured masks and the decode against the six-capability
     table, and **escalate to the user as a new decision** (accept-and-document or a follow-up
     change). Do **not** add `capsh`/`setpriv`/`libcap2-bin` in this change (D2).
 
@@ -491,14 +493,32 @@ inferred.
     `docker compose logs --tail 200 robotina` (non-empty and carries the `engram` / `opencode`
     banner lines).
 
-- [ ] 28. Verify s6 recovery and the single-lifecycle property (AC5, AC8 amended proof).
+- [x] 28. Verify s6 recovery and the corrected single-lifecycle property (AC5, AC8 amended proof).
   Files: `odd/tasks/single-robotina-container.md`. Depends on: task 21.
-  - Verify: `docker compose exec robotina sh -c 'pkill -f "[o]pencode serve"'` then the
-    bounded credential-aware health probe loop (30 × 2 s) must succeed without manual
-    intervention; then capture
-    `docker inspect --format '{{.RestartCount}} {{.State.StartedAt}}' robotina`, run
-    `docker compose exec robotina sh -c 'pkill -f "[h]ermes gateway"'`, and assert the counter
-    increased and `StartedAt` moved. Destructive by design — run last in the session.
+  **Defect found in slice 09 and resolved in slice 10.** The proof as originally written asserted
+  a contract the architecture does not have: `hermes gateway run` is the s6 service
+  `gateway-default`, so killing it can never cycle the container; and without `CAP_KILL` the root
+  s6 supervisors could not signal their uid-10000 children, so an in-container shutdown **wedged**
+  and Docker had to SIGKILL after `stop_grace_period`. Resolution (user decision, slice 10): add
+  `KILL` to `cap_add` — six capabilities, bounding mask `0xeb`; the uid-10000 processes keep
+  `CapEff=0x0` and cannot gain it — and document the measured lifecycle contract: s6 supervises
+  and restarts the gateway **in place**, and the container exits when the **supervision tree**
+  goes down, not when Hermes exits. The capability-set and lifecycle amendments are recorded in
+  `design.md` §13.3, spec `agent-container` AC4/AC8 and proposal R4.
+  - Verify (observed in slice 10):
+    1. **Recovery:** `docker compose exec robotina sh -c 'pkill -f "[o]pencode serve"'` (a root
+       exec now succeeds because `CAP_KILL` is present) followed by the bounded credential-aware
+       health probe loop (30 × 2 s) must succeed without manual intervention.
+    2. **Corrected lifecycle:** capture
+       `docker inspect --format '{{.RestartCount}} {{.State.StartedAt}}' robotina` and
+       `docker compose exec robotina sh -c 'pgrep -f "[h]ermes gateway" | head -1'`, run
+       `docker compose exec -u hermes robotina sh -c 'pkill -f "[h]ermes gateway"'`, then assert
+       the gateway pid is a **new, non-empty** pid (an empty match is a FAILURE) while
+       `RestartCount` and `StartedAt` stay **unchanged** — s6 restarted the service in place and
+       the container did not cycle.
+    3. **Graceful shutdown:** `docker compose stop robotina` completes **within** the 20 s grace
+       period with exit code `0` and no SIGKILL; record the measured duration.
+    Destructive by design — run last in the session.
 
 ## Phase 6 — Migration helper and documentation
 
@@ -737,6 +757,13 @@ inferred.
   the root s6 supervisors cannot signal the uid-10000 services without `CAP_KILL`; the container
   never exits and `restart: unless-stopped` never fires. This is a defect/decision for `sdd-verify`
   (add `CAP_KILL`, change the main program, or re-word AC8), not an apply fix.
+- **Slice 10 update (apply):** the task-28 defect is **resolved**. The user chose to add `KILL`
+  (six capabilities, bounding mask `0xeb`) and to document the measured lifecycle contract. Task
+  28 was re-verified on the live stack and closed: s6 recovery (4.37 s), gateway restarted in
+  place by s6 with `RestartCount`/`StartedAt` unchanged, and `docker compose stop robotina`
+  graceful in **5.50 s** with exit code `0` (no SIGKILL). AC4, AC8, proposal R4, `SECURITY.md`
+  and `design.md` §13.3 were amended in the same slice. Task 26 (peak `pids.current`), 38, 40, 41
+  and 42–45 remain open by design and were not started.
 - The five proof defects reported in design §19 are already reflected in the spec recipes;
   tasks 19 and 21 close the two remaining apply obligations, and task 40 records the observed
   gate behaviour.

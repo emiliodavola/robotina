@@ -51,7 +51,9 @@ makes it explicit and testable.
   merged `/etc/gitconfig`) into it.
 - **Supervision wiring**: `opencode serve` and `engram` become **s6 longruns** registered in
   the vendor's empty `user2` bundle, with an `opencode-init` oneshot for idempotent file
-  work. The container CMD stays Hermes' main program.
+  work. `opencode serve` and `engram` are s6 services, and `gateway-default`
+  (`hermes gateway run`) is s6-supervised too — the container's PID 1 is the s6 tree, not
+  Hermes.
 - **Naming**: compose service + `container_name` = `robotina`; image tag, build directory and
   every doc/script reference follow.
 - **Loopback server**: `opencode serve --hostname 127.0.0.1 --port 4096`, with a readiness
@@ -117,16 +119,21 @@ vendor's empty `user2` bundle — the vendor's own extension slot. The `opencode
 drops to the app uid with `s6-setuidgid hermes`, sets its own `HOME`, exporter variables and
 API key, and execs `opencode serve --hostname 127.0.0.1 --port 4096`. Because `/init` brings
 the whole tree up *before* exec'ing the CMD, opencode starts **before** Hermes and must never
-be the CMD. Consequently the two processes share a lifetime: if Hermes exits, the container
-exits and takes opencode and engram with it (accepted regression R4).
+be the CMD. **Measured at apply (task 28): the whole tree, gateway included, is s6-supervised.**
+`gateway-default` (`hermes gateway run`) is an s6 service that s6 restarts in place, so a
+gateway crash does **not** exit the container; the container exits when the s6 supervision tree
+(PID 1) goes down. The processes therefore share **one** lifecycle with the container, which is
+accepted regression R4 — not two independent failure domains.
 
 **4.4 Process-level configuration.** Compose sets both keys under **distinct names**; the
 opencode run script exports the vendor-expected name **for its own process only**. Hermes'
 main program inherits its own value. No vendor file is patched.
 
 **4.5 Compose shape.** One service `robotina` (no `user:`, no `init: true`, merged resource
-limits, `NO_PROXY` updated to `…,robotina,egress-proxy`, `cap_add` unchanged — Hermes still
-needs the five), plus the unchanged `egress-proxy` service.
+limits, `NO_PROXY` updated to `…,robotina,egress-proxy`, `cap_add` changed at apply from five
+to **six** — Hermes needs the five, and `KILL` was added because the root s6 supervisors cannot
+signal their uid-10000 children without it, which wedged an in-container shutdown; the app uid
+still keeps `CapEff=0x0` and cannot gain it), plus the unchanged `egress-proxy` service.
 
 ## 5. Requirement set
 
@@ -141,7 +148,7 @@ exists — recipes are shell-level, per `openspec/config.yaml`).
 | A1 | The compose file SHALL define exactly two services: `robotina` and `egress-proxy`. The `hermes` and `opencode` services SHALL cease to exist. | `docker compose config --services` → `robotina`, `egress-proxy` |
 | A2 | The `robotina` container SHALL have `container_name: robotina`. | `docker compose ps --format '{{.Name}}'` |
 | A3 | `robotina` SHALL NOT declare `user:`, SHALL NOT declare `init: true`, and SHALL RUN with the image entrypoint as PID 1 (s6-overlay). | `docker compose config -q`; `docker compose exec robotina sh -c 'tr "\0" " " < /proc/1/cmdline'` |
-| A4 | `robotina` SHALL keep `cap_drop: [ALL]` plus exactly the five capabilities Hermes requires (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`), `no-new-privileges:true`, `ulimits.core: 0`, `pids_limit`, and bounded json-file logs. | `docker compose exec robotina sh -c 'grep -E "Cap(Bnd|Eff)" /proc/1/status'` |
+| A4 | `robotina` SHALL keep `cap_drop: [ALL]` plus exactly the six capabilities the supervision tree requires (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`, `KILL` — amended at apply, task 28: `KILL` was added so the root s6 supervisors can signal their uid-10000 children on shutdown), `no-new-privileges:true`, `ulimits.core: 0`, `pids_limit`, and bounded json-file logs. | `docker compose exec robotina sh -c 'grep -E "Cap(Bnd|Eff)" /proc/1/status'` (bounding mask `0xeb`) |
 | A5 | `opencode` and `engram` SHALL run as supervised s6 services (visible to s6), not as backgrounded children of an entrypoint. | `docker compose exec robotina s6-rc -a list` includes `opencode`, `engram` |
 | A6 | The merged service SHALL carry a single consolidated budget: `mem_limit: 6g`, `cpus: 6.0` (decided, §17 answer 4), plus a `pids_limit` sized for Hermes + opencode + LSP children + engram + builds (`pids_limit` value pending measurement — §6.2 R5). | `docker compose config -q`; `docker compose exec robotina sh -c 'cat /sys/fs/cgroup/pids.max'` |
 | A7 | `robotina` SHALL join only the `agents` network and SHALL publish no ports. | `docker compose config -q`; `docker compose ps --format '{{.Ports}}'` empty |
@@ -208,8 +215,8 @@ This is the section requiring explicit sign-off. The deltas are split honestly: 
 | --- | --- | --- |
 | R1 | **The GitHub credential invariant is retired.** `GITHUB_TOKEN`, `gh` and the git credential helper now live in the same container as the Telegram-facing agent. | Prompt injection into the bot now reaches GitHub directly (read private repos, push) instead of being stopped at the delegation boundary. The always-loaded context file and both Hermes skills must stop claiming otherwise. **Decided (§17 answer 1): the PAT is kept as-is — no narrowing work is part of this change.** |
 | R2 | **Per-process key isolation is not enforceable.** Same uid, same container: `/proc/<pid>/environ`, `/proc/<pid>/fd` and any file the other process writes are reachable in principle. | The acceptance criterion "each process is configured with only its own key" is satisfiable; "neither can read the other's key" is **not**. Relying on `ptrace_scope`/Yama is not a security control. The only paths to a real boundary are separate containers (status quo) or separate uids with a redesigned workspace-sharing model — both out of scope. |
-| R3 | **Capabilities are per-container, not per-process.** The OpenCode process now lives under `cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]`; today it runs with pure `cap_drop: ALL`. | No explicit capability dropping is added (D2). The actual `CapEff`/`CapBnd` of the uid-10000 opencode process MUST be **measured** and recorded as evidence, so the document states the fact rather than an assumption. |
-| R4 | **Single lifecycle.** A Hermes crash exits the container and takes opencode and engram down with it. | Today they are independent failure domains. Inherent to the merge; the container CMD *is* Hermes' main program. |
+| R3 | **Capabilities are per-container, not per-process.** The OpenCode process now lives under `cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]` (six after the task-28 amendment); today it runs with pure `cap_drop: ALL`. | No explicit capability dropping is added (D2). The actual `CapEff`/`CapBnd` of the uid-10000 opencode process MUST be **measured** and recorded as evidence, so the document states the fact rather than an assumption. Measured: `CapEff=0x0`, so the app uid cannot gain `KILL`. |
+| R4 | **Single lifecycle.** All the processes in the container share **one** lifecycle: the container's PID 1 is the s6 supervision tree, `gateway-default` (`hermes gateway run`) is an s6-supervised service, and `opencode`/`engram` are s6 services too. | Today they are independent failure domains. Inherent to the merge. **Measured at apply (task 28): the original claim "a Hermes crash exits the container" was false** — a gateway crash is restarted in place by s6 and the container keeps running (`RestartCount` unchanged). The accepted consequence is that the agents share one lifecycle **with the container** (the container exits when the supervision tree goes down) rather than two independent failure domains. |
 | R5 | **Shared resource budget.** `mem_limit: 2g` + `4g` and `cpus: 2.0` + `4.0` collapse into one budget, and `pids_limit: 512` now covers Hermes + opencode + LSP children + engram + R/go builds. | **Decided (§17 answer 4): `mem_limit: 6g`, `cpus: 6.0`** — the ceiling stays close to the previous total so a long R/go build is not OOM-killed alongside the Telegram gateway; the blast-radius gain of a tighter ceiling was traded away deliberately. `pids_limit` remains the **one measured item**: it MUST be re-forecast for the merged cgroup and recorded with its rationale (a too-tight limit fails as LSP fork storms; a too-loose one weakens containment). |
 | R6 | **A documented property is retired.** `odd/tasks/agent-interop-http.md` records the split as "isolation preserved". | That task file gets a **superseded-by** note; the history is not rewritten, but the two documents must not contradict each other silently. |
 | R7 | **`/workspace` sharing is unchanged but the boundary shrinks.** | Same uid, one filesystem, one capability set: the shared-workspace model no longer has a container boundary behind it as a second line of defence. |
@@ -490,7 +497,9 @@ rather than left as open items.
 
 - The merge is feasible in exactly one direction (D1) and its runtime shape is settled at the
   approach level: one service `robotina`, s6-supervised `opencode serve` + `engram` in the
-  vendor's `user2` bundle, Hermes' main program as the container CMD.
+  vendor's `user2` bundle, and the whole tree — gateway included — under the s6 supervision
+  tree as the container's PID 1 (corrected at apply: `gateway-default` is itself an s6
+  service, so the gateway is restarted in place rather than taking the container down).
 - Requirement sets A/B/C plus the frozen invariants (INV1–INV5) are written with a **named shell-level
   proof per requirement**, ready for `sdd-spec` Given/When/Then conversion.
 - Security deltas are split into 3 improvements and 7 accepted regressions; the regressions

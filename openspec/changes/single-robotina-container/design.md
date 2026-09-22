@@ -47,7 +47,7 @@ measurement was executed here, and no number below claims to be measured.
 | Q1 | `pids_limit` for the merged cgroup | **1024** (forecast + pre-committed adjustment rule, confirmed by the recipe in §16) | keep 512 (the old per-container value); unlimited; 2048+ | §16 |
 | Q2 | Readiness for `opencode serve` | **`opencode-ready` oneshot** that polls `GET /global/health` with a 120 s bound, ordered after the `opencode` longrun and before the CMD | `notification-fd` (opencode emits no readiness byte); `s6-notifyoncheck` (works, but no gate); bounded wait inside `opencode-init` (structurally impossible: it runs *before* the server) | §9.1 |
 | Q3 | s6 restart policy for the longruns | **`finish` script with capped exponential backoff (1→30 s), no latch**; backoff counter reset after a healthy run ≥ 10 s | s6 default (immediate unbounded restart); a `down`-file circuit breaker (needs manual intervention, contradicts self-healing) | §9.2 |
-| Q4 | Proven capability set for the uid-10000 opencode process | **Measure and record** `CapEff`/`CapBnd`/`CapPrm`/`CapAmb` + `NoNewPrivs`; expected `CapBnd = 0x00000000000000cb`, `CapEff = 0x0`; **no dropping added**; if capabilities are retained, record the fact and escalate to the user as a new decision | adding `capsh`/`setpriv` dropping (D2 forbids); adding `libcap2-bin` for `getpcaps` (not needed: the masks decode by hand) | §13 |
+| Q4 | Proven capability set for the uid-10000 opencode process | **Measure and record** `CapEff`/`CapBnd`/`CapPrm`/`CapAmb` + `NoNewPrivs`; expected `CapBnd = 0x00000000000000eb` (six capabilities after the task-28 amendment — see §13), `CapEff = 0x0`; **no dropping added**; if capabilities are retained, record the fact and escalate to the user as a new decision | adding `capsh`/`setpriv` dropping (D2 forbids); adding `libcap2-bin` for `getpcaps` (not needed: the masks decode by hand) | §13 |
 | Q5 | `OPENCODE_SERVER_PASSWORD` | **Keep**, rewrite the rationale as defense-in-depth | remove it and simplify the skill/export helper | §10.3 — the spec's own EP6 proof requires a non-empty match in `README.md`, `README.en.md`, `SECURITY.md` **and** `scripts/export-state.sh`, i.e. retention is effectively forced by the frozen verification contract |
 | Q6 | `overlay.json` merge semantics when `$HOME/.config/opencode` already holds state | **Non-destructive, atomic, per-key merge; repo-declared keys win; `node_modules`/`package-lock.json` never touched; invalid JSON is quarantined, never fatal** | clobber-with-staged-tree (destroys user keys); fail-the-start on invalid JSON (bricks the container over a state file) | §8.3 |
 | Q7 | `scripts/fix-permissions.ps1` | **Recommend delete; requires user confirmation — not decided here, not deleted in this phase.** Interim (if the user declines or defers): keep the file with a "superseded / not part of setup" header and update its target list | keep-and-re-document as a setup step (re-introduces the unpinned-`alpine:latest`-as-root trap and contradicts I2 and SL6's human check) | §8.4 |
@@ -390,11 +390,16 @@ Consequences to state plainly:
 - **What Hermes can see on its first prompt:** a healthy loopback endpoint, merged config, the
   selected skin, and a shared `/workspace`. It cannot see a "sibling container" because there
   is none (ID3).
-- **Single lifecycle (R4), restated accurately:** the container's PID 1 is Hermes' main
-  program. When Hermes exits, the container exits and takes `opencode` and `engram` with it;
-  `restart: unless-stopped` then restarts the whole unit. There is no partial recovery, and a
-  Hermes crash loop now presents as a container restart loop — but recovery is
-  container-level, which is *softer* than "a crash leaves nothing running".
+- **Single lifecycle (R4), restated accurately after the apply measurement (task 28):** the
+  container's PID 1 is the **s6 supervision tree**, not Hermes. `hermes gateway run` is itself
+  the s6-supervised service `gateway-default`, so a gateway crash is restarted **in place** by
+  s6 and the container keeps running (`RestartCount` unchanged); `opencode` and `engram` are s6
+  services in the same tree. The container exits when the **supervision tree** goes down (an
+  operator `docker compose stop robotina` or a `docker kill` of PID 1), and `restart:
+  unless-stopped` then restarts the whole unit. There is no partial recovery and no private
+  gateway restart: the processes share **one** lifecycle with the container. **The original
+  statement here ("PID 1 is Hermes' main program; when Hermes exits the container exits") was
+  measured false** — see the amendment in §13.3.
 - **The reverse direction is deliberately gated:** if `opencode serve` is not healthy within
   the readiness bound, `opencode-ready` fails and the start is not silently degraded (§9.1).
 
@@ -516,8 +521,8 @@ export` with a default data dir would silently export an empty store.
 
 Today's mandatory host step runs **unpinned `alpine:latest` as root with the host state bind
 mounted** (project.md known traps, SECURITY.md) to chown five host folders and two volumes.
-After the merge, the container (which already has root at boot and the five capabilities
-Hermes needs) does it, before any service, every start, with no third party involved. That is
+After the merge, the container (which already has root at boot and the six capabilities the
+supervision tree needs, §13.3) does it, before any service, every start, with no third party involved. That is
 I2, and it is a net reduction in the privileged surface.
 
 ### 8.3 `opencode-init` (oneshot, runs as uid 10000) — the overlay semantics of Q6
@@ -923,7 +928,7 @@ docker compose exec robotina sh -c 'for p in $(pgrep -f "[o]pencode serve"); do 
 
 | Field | Expected | Why |
 | --- | --- | --- |
-| `CapBnd` | `0x00000000000000cb` | the container's bounding set is exactly the five `cap_add` capabilities under `cap_drop: [ALL]`: bit 0 CHOWN (1) + bit 1 DAC_OVERRIDE (2) + bit 3 FOWNER (8) + bit 6 SETGID (64) + bit 7 SETUID (128) = 203 = `0xcb`; capabilities are per-container, so the child inherits this mask |
+| `CapBnd` | `0x00000000000000eb` | the container's bounding set is exactly the six `cap_add` capabilities under `cap_drop: [ALL]`: bit 0 CHOWN (1) + bit 1 DAC_OVERRIDE (2) + bit 3 FOWNER (8) + bit 5 KILL (32) + bit 6 SETGID (64) + bit 7 SETUID (128) = 235 = `0xeb` (amended at apply, §13.3; the original five-capability forecast was `0xcb`); capabilities are per-container, so the child inherits this mask |
 | `CapEff` / `CapPrm` | `0x0000000000000000` | `s6-setuidgid hermes` performs a uid transition from 0 to a non-zero uid, and the kernel clears the permitted/effective sets on that transition; `NoNewPrivs: 1` prevents regaining anything through `execve`, and the opencode binary carries no file capabilities |
 | `CapAmb` | `0x0000000000000000` | no ambient set is raised by the vendor's supervision chain |
 | `NoNewPrivs` | `1` | `security_opt: no-new-privileges:true` (AC4 proof) |
@@ -931,20 +936,70 @@ docker compose exec robotina sh -c 'for p in $(pgrep -f "[o]pencode serve"); do 
 **If capabilities turn out to be retained** (`CapEff != 0`):
 
 1. **Record the truth, not the expectation**: write the measured masks into `SECURITY.md`'s R3
-   entry, replacing the expected values, and add the decode against the five-cap table.
-2. **State the blast radius honestly**: the retained set is the same five capabilities Hermes
-   needs. Indoors, `CAP_DAC_OVERRIDE`/`CAP_FOWNER` mean the OpenCode process could read/write
+   entry, replacing the expected values, and add the decode against the capability table (six
+   bits after §13.3).
+2. **State the blast radius honestly**: the retained set is the same six capabilities the
+   supervision tree needs. Indoors, `CAP_DAC_OVERRIDE`/`CAP_FOWNER` mean the OpenCode process could read/write
    files owned by any uid **inside** the container (the container's only other uid is the same
    10000, so the practical delta is small); `CAP_SETUID`/`CAP_SETGID` would let it become
    container-root, which is not an escape from the container but is a real privilege step inside
-   it. None of the five is `CAP_SYS_ADMIN`, so no new mount/namespace capability is introduced.
+   it. None of the six is `CAP_SYS_ADMIN`, so no new mount/namespace capability is introduced.
 3. **Escalate, do not mitigate silently**: D2 was decided under "no extra capability work". A
    retained `CapEff` is a *new* security fact that the user signed nothing about; it goes back
    to the user as an explicit decision (accept-and-document, or a follow-up change that drops
    the capabilities in the run script), exactly like the R-regressions were signed off.
 4. Do **not** add `capsh`/`setpriv` dropping in this change, and do **not** add `libcap2-bin` to
    the image for `getpcaps`: the masks are readable from `/proc/<pid>/status` and decode against
-   the documented 5-bit table, so `SECURITY.md`'s evidence needs no new package.
+   the documented capability table, so `SECURITY.md`'s evidence needs no new package.
+
+### 13.3 AMENDMENT at apply (task 28) — `KILL` added, and the lifecycle contract corrected
+
+**Status: implemented and measured in this change (apply, slice 10).** This is the one place
+where `apply` changed a design decision, and it is recorded as an amendment rather than silently
+absorbed. Two corrections, both driven by runtime measurement:
+
+**(a) The capability set goes from five to six: `KILL` is added.**
+
+- **Measured defect.** With `cap_drop: [ALL]` plus only `CHOWN, DAC_OVERRIDE, FOWNER, SETUID,
+  SETGID`, an in-container shutdown **wedged**: the root s6 supervisors could not signal their
+  uid-10000 services, `s6-rc -bda change` never completed, PID 1 never exited, and Docker had to
+  send SIGKILL after `stop_grace_period` (observed in slice 09, task 28).
+- **Decision (user, this slice).** Add `CAP_KILL`. The set is now
+  `CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL`; the bounding mask is `0xeb`
+  (`0xcb | 0x20`), i.e. 235.
+- **Why it does not widen the agent's power.** The capability is readmitted to the **container**
+  so the root supervisors can signal the uid-10000 children. The uid-10000 processes stay at
+  `CapEff=0x0` (measured), so they cannot gain `KILL`; the change restores supervision mechanics
+  and adds no reach to the agent.
+- **Measured after the change.** PID 1: `CapBnd=0xeb`, `CapEff=0xeb`, `Uid=0`,
+  `NoNewPrivs=1`. The uid-10000 `opencode serve` process: `CapEff=0x0`, `CapPrm=0x0`,
+  `CapBnd=0xeb`, `CapAmb=0x0`, `NoNewPrivs=1`.
+
+**(b) The lifecycle contract is "s6 supervises and restarts the gateway", not "the container dies
+with Hermes".**
+
+- **Measured defect.** `hermes gateway run` is the s6-supervised service `gateway-default`
+  (`/run/service/gateway-default/run`), not the container's main program. Killing it as uid 10000
+  leaves the container running with `RestartCount`/`StartedAt` unchanged and a new gateway pid —
+  s6 restarts it in place. The original §6 claim ("PID 1 is Hermes' main program; when Hermes
+  exits the container exits") was false. The vendor confirms the model in its own log:
+  `gateway is now running under s6 supervision (auto-restart on crash …)`.
+- **Corrected contract.** The container's PID 1 is the **s6 supervision tree**; the container
+  exits when that tree goes down (operator `docker compose stop`/`kill` of PID 1), and
+  `restart: unless-stopped` then brings the whole unit back. A gateway crash is a *service*
+  restart, not a container cycle. The accepted consequence (proposal R4) is that all the
+  processes share **one** lifecycle with the container — a more robust behavior than the design
+  assumed, not a weaker one, but it is **not** two independent failure domains.
+- **Measured after the change.** With `KILL` present, `docker compose stop robotina` completes
+  **gracefully in 5.50 s** (well inside the 20 s `stop_grace_period`), exit code `0`, not
+  OOM-killed, and the log shows the full s6 bring-down
+  (`opencode-ready` → `opencode` → `main-hermes` → `dashboard` → `engram` → `opencode-init` →
+  `legacy-cont-init` → `fix-attrs`, all `successfully stopped`, gateway receiving SIGTERM).
+
+**Consequences carried into the other artifacts:** spec `agent-container` AC4/AC8 amended
+(six-capability requirement, measured lifecycle scenario), proposal R4 corrected, `SECURITY.md`
+R4 + the capability entry + the shutdown note updated, `compose.yml`'s Spanish comment records
+why, and task 28's proof rewritten to the corrected contract.
 
 ---
 
@@ -954,7 +1009,7 @@ docker compose exec robotina sh -c 'for p in $(pgrep -f "[o]pencode serve"); do 
   scripts derive ownership targets from `id -u hermes`, so a `HERMES_UID`/`HERMES_GID` override
   cannot silently corrupt ownership.
 - The specs' numeric proofs (EP5's `Uid: 10000 10000 10000 10000`, SL6's `stat -c "%u:%g"`
-  expectations, `CapBnd`'s `0xcb`) **assume the default 10000** and no `HERMES_UID` override.
+  expectations, `CapBnd`'s `0xeb`) **assume the default 10000** and no `HERMES_UID` override.
   The docs must say so, because a user who changes `HERMES_UID` would invalidate those recipes
   without invalidating the design.
 
@@ -1064,7 +1119,7 @@ services:
       retries: 3
       start_period: 90s
     <<: *hardening
-    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]   # seis (ver §13.3)
 
 volumes:
   opencode_db:
@@ -1095,7 +1150,7 @@ Delta summary a reviewer can diff by hand:
 | networks | unchanged; `robotina` joins `agents` only (AC7) |
 | volumes | both names unchanged, targets re-rooted under `/opt/data` (SL2/SL5) |
 | tmpfs | `/tmp` exec kept (single instance now) |
-| `cap_add` | unchanged five |
+| `cap_add` | **six** — `KILL` added at apply (§13.3) |
 
 ---
 
@@ -1200,7 +1255,7 @@ design-owned OPEN ITEMS are closed in the sections named.
 | Requirement group | Design section that closes it |
 | --- | --- |
 | AC1–AC3 (one service, name, PID 1/s6) | §4, §15 (no `user:`, no `init: true`), §6 stage 1 |
-| AC4 (hardening + five caps) | §15 (anchor unchanged apart from `pids_limit`), §13 |
+| AC4 (hardening + six caps) | §15 (anchor unchanged apart from `pids_limit`), §13, §13.3 (amendment) |
 | AC5 (s6-supervised opencode + engram, observable output, restart on kill) | §5, §9.2, §9.3 |
 | AC6 (budget: 6g / 6.0 / finite `pids_limit`) | §15, §16 |
 | AC7 (agents-only, no published port) | §15 |
@@ -1249,6 +1304,14 @@ assert after the kill that the counter increased (and `StartedAt` moved), which 
 container went down and came back as one unit, i.e. that `opencode`/`engram` did not survive
 independently. The narrow `--format` keeps the secret-safety rule. Flagged as a blocker for
 executing AC8's second scenario as written.
+
+**RESOLVED at apply (task 28) — and the proposed amendment was itself wrong.** The measured
+reality is that `hermes gateway run` is the s6 service `gateway-default`, so killing it can never
+cycle the container: the counter/`StartedAt` assertion does **not** hold and must not be used.
+The lifecycle claim was corrected (see §13.3(b)) and AC8's scenario was rewritten to the measured
+contract — a gateway crash is restarted by s6 in place while `RestartCount`/`StartedAt` stay
+unchanged. The container exits when the s6 supervision tree goes down. This section is kept as
+the record of the original finding, not as an open item.
 
 ### 19.2 `pgrep -f` patterns match their own probe shell
 
