@@ -266,6 +266,17 @@ RUN set -eux; \
 # OPENCODE_GO_API_KEY desde ROBOTINA_OPENCODE_GO_API_KEY (ver el comentario del
 # propio script); se instala junto al resto de los archivos de /opt/robotina y
 # se valida con `sh -n` en el mismo bloque.
+#
+# `profile.d/robotina-path.sh` existe por el reset duro de PATH que el
+# /etc/profile de Debian aplica a los LOGIN shells (bash -l, sh -l, su -). Ese
+# reset (linea 9) corre ANTES de sourcear /etc/profile.d/*.sh (27-28), asi que
+# sin este archivo un login shell pierde `hermes` (/opt/hermes/bin, los
+# binarios del venv y /opt/data/.local/bin) y resuelve `opencode` a
+# /usr/local/bin/opencode: ese binario se autentica con la clave de Hermes en
+# vez de con la propia de OpenCode, deshaciendo la separacion de credenciales
+# (ver robotina/bin/opencode). Reponerlo en /etc/profile.d alcanza porque el
+# sourceo va despues del reset; se instala junto al resto de los archivos de
+# /opt/robotina y se valida con `sh -n` en el mismo bloque.
 COPY . /opt/robotina-src/
 RUN set -eux; \
     install -d /opt/robotina /opt/robotina/bin; \
@@ -274,10 +285,12 @@ RUN set -eux; \
     install -m 0755 /opt/robotina-src/opencode-ready.sh /opt/robotina/opencode-ready.sh; \
     install -m 0755 /opt/robotina-src/healthcheck.sh /opt/robotina/healthcheck.sh; \
     install -m 0755 /opt/robotina-src/bin/opencode /opt/robotina/bin/opencode; \
+    install -m 0755 /opt/robotina-src/profile.d/robotina-path.sh /etc/profile.d/robotina-path.sh; \
     sh -n /opt/robotina/opencode-init.sh; \
     sh -n /opt/robotina/opencode-ready.sh; \
     sh -n /opt/robotina/healthcheck.sh; \
     sh -n /opt/robotina/bin/opencode; \
+    sh -n /etc/profile.d/robotina-path.sh; \
     test -d /opt/robotina-src/s6/cont-init.d; \
     for f in /opt/robotina-src/s6/cont-init.d/*; do \
       [ -f "$f" ] || continue; \
