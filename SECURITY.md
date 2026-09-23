@@ -436,7 +436,7 @@ contenedor `robotina`. `opencode serve` escucha en **loopback** y Hermes lo alca
 | Alcance | Solo loopback **dentro** del contenedor. El puerto **no** se publica: no lo alcanza el host, ni la LAN, ni ningún par de la red `agents`. |
 | Dirección del flujo | Hermes llama a `http://127.0.0.1:4096`. Al revés no hace falta. |
 | Credenciales | `OPENCODE_SERVER_PASSWORD` es defensa en profundidad (ver abajo). Con la variable presente, el servidor exige HTTP Basic (usuario `opencode`) y Hermes la manda desde su entorno. |
-| Conocimiento | Skill `opencode-server` en `hermes/skills/`, montada **read-only** en `/opt/data/skills/stack`: el agente no puede reescribir **estas** instrucciones. El resto de su árbol de skills vive en el bind escribible `/opt/data`, que sí puede modificar. |
+| Conocimiento | El agente usa el **CLI local** (wrapper en `/opt/robotina/bin/opencode`) y la skill **builtin `opencode`** que trae el vendor, que documenta ese CLI. El repo ya **no** publica una skill propia para OpenCode; `hermes/skills/` solo monta `github-private-repos`, **read-only** en `/opt/data/skills/stack`, así que el agente no puede reescribir estas instrucciones. El resto de su árbol de skills vive en el bind escribible `/opt/data`, que sí puede modificar. |
 | Arranque | Un oneshot `opencode-ready` no declara el arranque terminado hasta que `/global/health` responde de verdad; el gate es acotado y con credencial. |
 | Egreso | Sin cambios: `opencode` no tiene ruta propia. Su llamada al modelo aparece como `models.opencode.ai TCP_TUNNEL` en el log del proxy. |
 
@@ -471,8 +471,8 @@ warning, sabés que falta.
 Solo tiene autenticado el tier **free** de `opencode/*` (`mimo-v2.5-free`,
 `nemotron-3-ultra-free`, `muse-spark-1.3-contributor-free`, …). Son gratis y suficientes para
 probar el circuito; para que use el plan Go hay que autenticarlo aparte (`opencode auth`,
-interactivo). El listado real está siempre en `GET http://127.0.0.1:4096/config/providers`
-desde adentro del contenedor.
+interactivo). Para listar el catálogo usá el endpoint **público** de modelos del plan; **nunca**
+`GET http://127.0.0.1:4096/config/providers`, que expone las claves (ver la trampa de abajo).
 
 **Trampa documentada: `GET /config/providers` serializa las credenciales del proveedor en
 texto plano.** Ese endpoint devuelve, por proveedor, la clave tal cual. Nunca lo dumpees a un
@@ -481,9 +481,11 @@ trabajo, y cualquier credencial que haya quedado expuesta así **debe rotarse**.
 catálogo del plan está el endpoint público de modelos (ver «Modelo y plan del proveedor»), que
 no necesita exponer la clave.
 
-Nota: la skill que Hermes trae de fábrica (`opencode`) asume que el **CLI** está disponible en
-su propio entorno; la skill de este stack (`opencode-server`) es la que aplica y apunta al
-endpoint local.
+Nota: la superficie de conocimiento del agente para OpenCode es la skill **builtin `opencode`**
+que trae el vendor, que documenta el **CLI** — y el CLI ahora sí está disponible en el entorno
+del agente (wrapper en `/opt/robotina/bin/opencode`, que le da la clave propia de OpenCode). El
+repo ya **no** publica una skill propia para OpenCode: la que existía (orientada al endpoint HTTP
+local) se eliminó por duplicar la builtin.
 
 ## Persistencia: qué vive dónde
 

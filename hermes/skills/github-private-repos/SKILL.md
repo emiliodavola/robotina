@@ -8,7 +8,7 @@ platforms: [linux]
 metadata:
   hermes:
     tags: [GitHub, Credentials, Private-Repos, Security]
-    related_skills: [opencode-server]
+    related_skills: [opencode]
 ---
 
 # GitHub: private repositories and credentials
@@ -67,6 +67,6 @@ refusing the write specifically.
 | Symptom | Meaning |
 | --- | --- |
 | `404` on a private repo | The PAT does not include that repo, or it expired. Report it as a token-permissions problem, with the exact repo. |
-| `403` with an HTML body | The host is not in the proxy allowlist. See the egress notes in the `opencode-server` skill. |
+| `403` with an HTML body | The host is not in the proxy allowlist. See the egress section of `README.md` ("Agregar un dominio de egreso") and `SECURITY.md`. |
 | `403` with a git body (`Write access to repository not granted.`) | GitHub itself: the token does not cover that repository. A permissions problem, not an allowlist problem. |
 | `Permission denied` writing in `/workspace` | Ownership problem on the shared mount, not a credential problem. Report it; the host has `scripts/fix-permissions.ps1`. |

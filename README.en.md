@@ -55,8 +55,9 @@ Three consequences of the design worth knowing up front:
 
 - **The OpenCode server listens on `127.0.0.1:4096`, loopback only.** You cannot
   reach it from the host or from another container: to drive it you go into the
-  container with `docker compose exec robotina …` (recipes below), or you
-  delegate from Hermes, whose `opencode-server` skill carries the recipe.
+  container with `docker compose exec robotina …` (recipes below). The agent also
+  has the `opencode` CLI installed locally, which is the normal path, and the
+  vendor's builtin `opencode` skill is what documents that CLI.
 - **The whole container shares one `HOME`** (`/opt/data`) and one uid (10000).
   Hermes state, the OpenCode config and the git config all land inside the
   `${HOST_DATA_DIR}/hermes` bind.

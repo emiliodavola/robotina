@@ -54,13 +54,16 @@ robotina/
   opencode-init.sh           # oneshot: staged gentle-ai tree, per-key overlay merge, atomic write
   opencode-ready.sh          # oneshot: bounded credential-aware readiness poll on /global/health
   healthcheck.sh             # loopback health probe + `engram serve` existence check
+  bin/opencode               # PATH wrapper: gives the local CLI OpenCode's own key
   s6/cont-init.d/            # 10-robotina-state (ownership), 20-robotina-identity (display.skin)
   s6/s6-rc.d/                # opencode, engram (longruns) + opencode-init, opencode-ready (oneshots)
 hermes/
   skins/robotina.yaml        # identity skin (name + branding.agent_name), mounted read-only
   context/.hermes.md         # highest-priority environment facts, mounted at /workspace/.hermes.md
-  skills/opencode-server/SKILL.md       # how the agent reaches the local OpenCode HTTP server
-  skills/github-private-repos/SKILL.md  # PAT usage; the credential split is retired
+  skills/                    # repo-local skills, mounted read-only at /opt/data/skills/stack
+    github-private-repos/SKILL.md  # PAT usage; the credential split is retired
+    # No agent-facing OpenCode knowledge lives here: the local CLI is documented by
+    # the vendor's builtin `opencode` skill. This repo ships no skill of its own for it.
 squid/
   squid.conf                 # deny private ranges before the allowlist
   allowlist.txt              # the only permitted egress destinations
