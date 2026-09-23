@@ -1188,3 +1188,58 @@ of the skill would have regressed that requirement silently.
 `ROBOTINA_*`-prefixed names while `compose.yml` (and `.env.example`) still expect
 `HERMES_OPENCODE_GO_API_KEY` / `OPENCODE_GO_API_KEY`; the stack validates and runs because those
 are exported in the shell. `compose.yml` and `.env.example` were out of scope and were not touched.
+
+## Follow-up (post-merge) — restore the image PATH in login shells (2026-09-22)
+
+**This section is a later record, not part of the merged change above.** Branch
+`fix/login-shell-path`, cut from `main`.
+
+### Symptom
+
+Debian's `/etc/profile` **hard-resets `PATH`** for login shells (`bash -l`, `sh -l`, `su -`). The
+reset is line 9; `/etc/profile.d/*.sh` is sourced afterwards (lines 27-28). Everything this image
+adds to `PATH` — the Hermes CLI (`/opt/hermes/bin`), the Hermes venv binaries, `/opt/data/.local/bin`
+and the `opencode` wrapper in `/opt/robotina/bin` — was therefore lost in any login shell. The
+serious row is `opencode`: with the wrapper missing from `PATH`, a bare `opencode` resolves to
+`/usr/local/bin/opencode`, which authenticates with **Hermes'** key instead of OpenCode's own,
+silently undoing the credential separation (see `robotina/bin/opencode`, spec `agent-credentials`
+CR8).
+
+### Measured evidence (before the fix, inside the running container)
+
+| command | login shell (`bash -lc`) | non-login shell |
+| --- | --- | --- |
+| `command -v hermes` | **NOT FOUND** | `/opt/hermes/bin/hermes` |
+| `command -v opencode` | `/usr/local/bin/opencode` (bypasses the wrapper) | `/opt/robotina/bin/opencode` |
+
+### Fix
+
+- New `robotina/profile.d/robotina-path.sh`, installed to `/etc/profile.d/robotina-path.sh` (mode
+  `0755`), re-prepends the image's own directories. It runs **after** `/etc/profile`'s reset because
+  the reset happens before the `profile.d` sourcing. It writes the literal `${PATH}` and keeps
+  `/opt/uv/bin` last, reproducing the image's `ENV PATH`, so the wrapper wins over
+  `/usr/local/bin/opencode`.
+- `robotina/Dockerfile`: installs the snippet next to the other `/opt/robotina` files and adds
+  `sh -n /etc/profile.d/robotina-path.sh` to the same `RUN` validation block.
+- Scope is login shells only: s6 services and `docker compose exec` use the image `ENV PATH` and do
+  not pass through `/etc/profile`, so their behaviour is unchanged.
+
+### Verification (branch `fix/login-shell-path`)
+
+- `docker compose build robotina` → exit `0`; the build log shows both the install line and
+  `+ sh -n /etc/profile.d/robotina-path.sh` executing.
+- `docker compose up -d --force-recreate robotina` → recreated; `docker compose ps` → exactly
+  `robotina` + `egress-proxy`, both `healthy`.
+- `bash -lc 'command -v hermes; command -v opencode'` → `/opt/hermes/bin/hermes` and
+  `/opt/robotina/bin/opencode`.
+- `-u 10000:10000 ... bash -lc 'command -v hermes; command -v opencode'` → `/opt/hermes/bin/hermes`
+  and `/opt/robotina/bin/opencode` (the case that matters: the wrapper wins for the agent uid).
+- Login-shell `PATH` == non-login `PATH` ==
+  `/opt/robotina/bin:/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/uv/bin`.
+- Non-login shell unchanged: `sh -c 'command -v opencode'` → `/opt/robotina/bin/opencode`.
+- `s6-rc -a list | wc -l` → `10`; `s6-svstat /run/service/opencode` → `up (pid 220 ...)`.
+- `docker compose logs --tail 80 robotina | grep -c "Connected to Telegram"` → `1`.
+- The installed file keeps the literal `${PATH}`: `tail -1 /etc/profile.d/robotina-path.sh` →
+  `export PATH="/opt/robotina/bin:/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:${PATH}:/opt/uv/bin"`.
+
+No commit, push, or PR was performed.
