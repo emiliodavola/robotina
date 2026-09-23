@@ -131,22 +131,38 @@ tienen default vacío (`${VAR:-}`).
 ```ini
 # Obligatorias
 HOST_DATA_DIR=               # carpeta del host donde vive todo el estado
-TELEGRAM_BOT_TOKEN=          # token emitido por @BotFather
-HERMES_OPENCODE_GO_API_KEY=  # clave del proveedor que usa Hermes
-OPENCODE_GO_API_KEY=         # clave del proveedor que usa OpenCode
+ROBOTINA_TELEGRAM_BOT_TOKEN= # token emitido por @BotFather
+ROBOTINA_HERMES_MODEL_KEY=   # clave del proveedor que usa Hermes
+ROBOTINA_OPENCODE_MODEL_KEY= # clave del proveedor que usa OpenCode
 
 # Opcionales
-TELEGRAM_ALLOWED_USERS=      # allowlist de usuarios de Telegram (ver abajo)
-OPENCODE_SERVER_PASSWORD=    # HTTP Basic del server de opencode (defensa en profundidad)
-GITHUB_TOKEN=                # PAT fine-grained; ver «Autenticación de GitHub»
+ROBOTINA_TELEGRAM_ALLOWED_USERS=   # allowlist de usuarios de Telegram (ver abajo)
+ROBOTINA_OPENCODE_SERVER_PASSWORD= # HTTP Basic del server de opencode (defensa en profundidad)
+ROBOTINA_GITHUB_TOKEN=             # PAT fine-grained; ver «Autenticación de GitHub»
+
+# Modelo de Hermes (no son secretos; ver «Modelo y plan del proveedor»)
+ROBOTINA_HERMES_MODEL_PROVIDER=    # proveedor (default opencode-go)
+ROBOTINA_HERMES_MODEL_BASE_URL=    # endpoint  (default https://opencode.ai/zen/go/v1)
+ROBOTINA_HERMES_MODEL=             # id del modelo (default deepseek-v4.1-flash)
 ```
 
 Las dos claves del proveedor entran al contenedor bajo **nombres distintos**. Hermes recibe la
 suya con el nombre exacto que espera la imagen vendor (`OPENCODE_GO_API_KEY`); `opencode serve`
 recibe la suya con un nombre propio (`ROBOTINA_OPENCODE_GO_API_KEY`) y su `run` de s6 la
-exporta como `OPENCODE_GO_API_KEY` **solo para su proceso**. El resultado observable es que
-**cada proceso queda configurado únicamente con su propia clave** (ver «Columnas de la
-fusión»).
+exporta como `OPENCODE_GO_API_KEY` **solo para su proceso**. En el `.env`, en cambio, ambas van
+namespaced (`ROBOTINA_HERMES_MODEL_KEY` y `ROBOTINA_OPENCODE_MODEL_KEY`) por la trampa de
+shadowing de abajo. El resultado observable es que **cada proceso queda configurado únicamente
+con su propia clave** (ver «Columnas de la fusión»).
+
+**Trampa documentada: el entorno del proceso pisa al `.env`.** Docker Compose le da
+precedencia al entorno del proceso por sobre el archivo `.env`. Un input que se llame igual que
+una variable del vendor o del ambiente del host puede quedar **shadowed en silencio** por un
+valor exportado viejo: pasó exactamente con `OPENCODE_GO_API_KEY`, que era el nombre del input
+en `.env` y a la vez el nombre propio del vendor. Con esa variable exportada en el shell, el
+contenedor recibió una credencial vieja en lugar de la del `.env`. Por eso **todos** los inputs
+de `.env` llevan prefijo `ROBOTINA_`, que no existe en el entorno del host: la colisión deja de
+ser posible. Corolario: no exportes estas variables en el shell; editá el `.env` y recreá el
+contenedor.
 
 Ojo al inspeccionar: la validación estática resuelve y **imprime los valores** del `.env` si se
 corre sin filtro. La forma correcta y única admitida es con `-q`; el resto de las recetas de
@@ -457,6 +473,13 @@ Solo tiene autenticado el tier **free** de `opencode/*` (`mimo-v2.5-free`,
 probar el circuito; para que use el plan Go hay que autenticarlo aparte (`opencode auth`,
 interactivo). El listado real está siempre en `GET http://127.0.0.1:4096/config/providers`
 desde adentro del contenedor.
+
+**Trampa documentada: `GET /config/providers` serializa las credenciales del proveedor en
+texto plano.** Ese endpoint devuelve, por proveedor, la clave tal cual. Nunca lo dumpees a un
+log, transcript o issue: una credencial se filtró exactamente por ese endpoint durante este
+trabajo, y cualquier credencial que haya quedado expuesta así **debe rotarse**. Para conocer el
+catálogo del plan está el endpoint público de modelos (ver «Modelo y plan del proveedor»), que
+no necesita exponer la clave.
 
 Nota: la skill que Hermes trae de fábrica (`opencode`) asume que el **CLI** está disponible en
 su propio entorno; la skill de este stack (`opencode-server`) es la que aplica y apunta al
