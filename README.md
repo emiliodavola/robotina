@@ -47,8 +47,11 @@ Tres consecuencias del diseño que conviene tener claras desde el principio:
 - **El server de OpenCode escucha en `127.0.0.1:4096`, solo loopback.** No lo
   alcanzás desde el host ni desde otro contenedor: para manejarlo se entra al
   contenedor con `docker compose exec robotina …` (recetas más abajo). El agente
-  además tiene el CLI `opencode` instalado localmente, que es la vía normal, y
-  la skill `opencode` que trae el vendor es la que documenta ese CLI.
+  además tiene el CLI `opencode` instalado localmente, que es la vía normal. Lo
+  documentan la skill `opencode` que trae el vendor (el CLI) y la skill propia del
+  repo `hermes/skills/opencode-delegation/SKILL.md` (delegación a OpenCode: el agente
+  ejecutor, la regla de proveedor/modelo, el endpoint no bloqueante y el servidor
+  único supervisado).
 - **Todo el contenedor comparte un solo `HOME`** (`/opt/data`) y un solo uid
   (10000). El estado de Hermes, la config de OpenCode y la de git caen todos
   dentro del bind de `${HOST_DATA_DIR}/hermes`.
@@ -401,7 +404,7 @@ squid/squid.conf                 política de Squid: default deny, sin intercepc
 squid/allowlist.txt              los dominios habilitados, uno por línea
 hermes/skins/robotina.yaml       la identidad visible del agente, montada read-only
 hermes/context/.hermes.md        hechos del entorno que Hermes lee al arrancar
-hermes/skills/                   skills propias, montadas read-only
+hermes/skills/                   skills propias (github-private-repos, opencode-delegation), montadas read-only
 scripts/migrate-state.ps1        copia hacia adelante el estado del layout anterior
 scripts/export-state.sh          saca el estado en volumen a JSON
 odd/tasks/                       decisiones y evidencia de cada etapa del stack
