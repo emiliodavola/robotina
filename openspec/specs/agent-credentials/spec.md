@@ -296,3 +296,54 @@ SHALL be provided by the `PATH` wrapper `/opt/robotina/bin/opencode`, which re-e
 - PROOF: `docker compose exec -T robotina sh -c 'command -v opencode'` (prints
   `/opt/robotina/bin/opencode`) and `docker compose exec -T robotina sh -c 'opencode --version'`
   (prints the version only: no key, no extra wrapper output).
+
+### Requirement: CR9 — A locally invoked `opencode` CLI resolves the stack's own identity
+
+The `PATH` wrapper `/opt/robotina/bin/opencode` SHALL pin `HOME=/opt/data` and the four `XDG_*`
+variables (`XDG_CONFIG_HOME=/opt/data/.config`, `XDG_DATA_HOME=/opt/data/.local/share`,
+`XDG_STATE_HOME=/opt/data/.local/state`, `XDG_CACHE_HOME=/opt/data/.cache`) for the process it
+executes, so that a CLI invoked from an environment whose `HOME` differs still loads the merged
+stack configuration. The pin SHALL be scoped to the executed process and SHALL NOT modify the
+container environment.
+
+The Hermes terminal snapshot exports `HOME="/opt/data/home"`
+(`/opt/data/cache/scratch/hermes-snap-*.sh`). Without the pin the CLI resolves its config and
+state under that directory instead: measured, `opencode debug paths` reports
+`config /opt/data/home/.config/opencode` and `data /opt/data/home/.local/share/opencode`, and
+`opencode debug config` reports `mcp: null` with no `permission` block. A server launched that way
+therefore has no MCP servers and no permission policy, and a tool call reaching outside its own
+cwd hits the default `external_directory: ask` and never returns — no human sits at that prompt,
+so `info.finish` stays `null` and the turn never completes.
+
+#### Scenario: The wrapper pins the identity when `HOME` differs
+
+- GIVEN the stack is up and the wrapper is installed at `/opt/robotina/bin/opencode`
+- WHEN the CLI is resolved from `PATH` with `HOME` set to the Hermes snapshot value
+- THEN `opencode debug paths` reports the config and data paths under `/opt/data`
+- PROOF: `docker compose exec -T -u hermes robotina sh -c 'HOME=/opt/data/home; export HOME; opencode debug paths'`
+  (the `config` and `data` lines MUST begin with `/opt/data/` and MUST NOT contain `/opt/data/home/`;
+  a `/opt/data/home` path or an error is a FAILURE)
+
+#### Scenario: The pinned identity loads the merged configuration
+
+- GIVEN the same `HOME` override
+- WHEN the resolved configuration is printed
+- THEN the MCP servers and the permission policy from the merged config are present
+- PROOF: `docker compose exec -T -u hermes robotina sh -c 'export HOME=/opt/data/home; opencode debug config > /tmp/cr9-config.json; python3 -c "import json; d=json.load(open(\"/tmp/cr9-config.json\")); mcp=d.get(\"mcp\") or {}; assert \"codegraph\" in mcp and \"engram\" in mcp, mcp; assert d.get(\"permission\"), \"no permission\"; print(\"mcp:\", sorted(mcp)); print(\"permission: present\")"'`
+  (must print the `mcp:` line listing `codegraph` and `engram` and the `permission: present` line; an
+  assertion error or a non-zero exit is a FAILURE)
+- NOTE: the output MUST be redirected to a file before it is parsed. `opencode debug config` caps its
+  stdout at exactly 65536 bytes when stdout is a pipe, and the merged configuration is ~165 kB, so a
+  piped read is truncated mid-string and the `mcp` block — which sits near the end — never arrives.
+  Measured: piped, exactly 65536 bytes and `json.load` raises `Unterminated string`; redirected to a
+  file, 345638 bytes of valid JSON. The cap applies to any future proof built on this command.
+
+#### Scenario: A delegation under the hostile `HOME` completes
+
+- GIVEN the same `HOME` override
+- WHEN a bounded task is delegated against a throwaway git repository under `/tmp`
+- THEN the file is mutated, which a run with a stub config cannot achieve
+- PROOF: `docker compose exec -T -u hermes robotina sh -c 'set -e; export HOME=/opt/data/home; d=$(mktemp -d /tmp/cr9.XXXXXX); cd "$d"; git init -q; git config user.email cr9@robotina.local; git config user.name cr9; printf "def add(a, b):\n    return a - b\n" > calc.py; git add calc.py; git commit -qm init; opencode run --agent build -m opencode-go/deepseek-v4-flash "Fix the bug in calc.py so add() adds. Do not change anything else." >run.log 2>&1; grep -n "return a + b" calc.py'`
+  (must print the corrected line; empty output or a non-zero exit is a FAILURE. The log goes to the
+  throwaway directory, never to `/tmp`: a `/tmp` path left by an earlier root-run probe is root-owned
+  and the next `hermes`-user run then fails on the redirect instead of on the delegation)

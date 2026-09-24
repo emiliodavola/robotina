@@ -1,24 +1,66 @@
 #!/bin/sh
 # Wrapper del CLI `opencode` para el shell del agente.
 #
-# Por que existe: `opencode` NO tiene almacen de credenciales (no hay auth.json
-# bajo /opt/data/.local/share/opencode): lee la clave del entorno. En el shell
-# del agente, OPENCODE_GO_API_KEY trae la clave de HERMES, porque la variable a
-# nivel contenedor tiene que llevarla para el entrypoint del vendor. La clave
-# propia de OpenCode vive en ROBOTINA_OPENCODE_GO_API_KEY y hasta ahora solo la
-# exportaba el run script del servicio `opencode`.
+# Cumple dos funciones. Las dos existen porque el CLI, a diferencia del servicio
+# `opencode`, no arranca desde el run script de s6, que es quien las garantiza
+# para el servidor.
 #
-# Consecuencia sin este wrapper: un CLI `opencode` lanzado a mano desde el
-# agente se autenticaria con la clave de Hermes y romperia la propiedad "cada
-# agente configurado solo con su propia clave" (spec agent-credentials, CR1).
+# 1) Identidad del stack: HOME y XDG_* fijados, solo para este arbol de procesos.
 #
-# Este wrapper reexporta la clave correcta para el proceso del CLI. Si
-# ROBOTINA_OPENCODE_GO_API_KEY no esta definida, no cambia nada: exec directo al
-# binario real (passthrough), de modo que degrada en vez de romper.
+#    Por que: el snapshot del terminal de Hermes exporta HOME=/opt/data/home
+#    (medido en /opt/data/cache/scratch/hermes-snap-*.sh), asi que un `opencode`
+#    lanzado desde ahi resuelve su configuracion y su estado bajo /opt/data/home
+#    en vez de bajo /opt/data. Medido con `opencode debug paths` y HOME=
+#    /opt/data/home: config=/opt/data/home/.config/opencode (un stub de una
+#    linea) y data=/opt/data/home/.local/share/opencode; y `opencode debug
+#    config` da mcp=null sin bloque `permission`.
+#
+#    Consecuencia observada: ese servidor arranca SIN servidores MCP
+#    (`GET /mcp` devuelve `{}`) y SIN la politica de permisos del overlay. Sus
+#    sesiones corren ademas con cwd /opt/data, asi que /workspace les queda como
+#    directorio externo y el default `external_directory: ask` deja la tool call
+#    en `running` para siempre, porque no hay un humano que conteste: el turno
+#    nunca cierra e `info.finish` queda en null.
+#
+#    El run script del servicio fija exactamente estas variables; el wrapper las
+#    fija para el CLI (y para cualquier server que el CLI levante), de modo que
+#    CLI y servicio carguen la misma configuracion. Van acotadas a este arbol de
+#    procesos, jamas al contenedor entero, para no perturbar el entorno de
+#    Hermes. Cubren de paso GOPATH, GIT_CONFIG_GLOBAL y ENGRAM_DATA_DIR, que el
+#    servicio tambien fija y que bajo HOME=/opt/data resuelven igual.
+#
+#    Escape hatch: /usr/local/bin/opencode es el binario real y no fija nada.
+#
+# 2) La credencial propia de OpenCode.
+#
+#    Por que existe: `opencode` NO tiene almacen de credenciales (no hay
+#    auth.json bajo /opt/data/.local/share/opencode): lee la clave del entorno.
+#    En el shell del agente, OPENCODE_GO_API_KEY trae la clave de HERMES, porque
+#    la variable a nivel contenedor tiene que llevarla para el entrypoint del
+#    vendor. La clave propia de OpenCode vive en ROBOTINA_OPENCODE_GO_API_KEY y
+#    hasta ahora solo la exportaba el run script del servicio `opencode`.
+#
+#    Consecuencia sin este wrapper: un CLI `opencode` lanzado a mano desde el
+#    agente se autenticaria con la clave de Hermes y romperia la propiedad "cada
+#    agente configurado solo con su propia clave" (spec agent-credentials, CR1).
+#
+#    Se reexporta la clave correcta para el proceso del CLI. Si
+#    ROBOTINA_OPENCODE_GO_API_KEY no esta definida, no cambia nada: exec directo
+#    al binario real (passthrough), de modo que degrada en vez de romper.
 #
 # Nunca imprime ni registra la clave. El destino va por ruta absoluta: la
 # resolucion por PATH la hace /opt/robotina/bin, que va primero y es root-owned
 # (mejor que el /opt/data/.local/bin escribible por el agente).
+
+# 1) Identidad del stack, solo para este arbol de procesos.
+HOME=/opt/data
+XDG_CONFIG_HOME=/opt/data/.config
+XDG_DATA_HOME=/opt/data/.local/share
+XDG_STATE_HOME=/opt/data/.local/state
+XDG_CACHE_HOME=/opt/data/.cache
+export HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME
+
+# 2) La credencial propia de OpenCode.
 if [ -n "${ROBOTINA_OPENCODE_GO_API_KEY:-}" ]; then
   OPENCODE_GO_API_KEY="$ROBOTINA_OPENCODE_GO_API_KEY"
   export OPENCODE_GO_API_KEY
