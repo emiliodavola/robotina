@@ -82,6 +82,17 @@ The delegation target must be an agent that executes.
 Trade-off accepted: an interactive TUI session now opens on `build` instead of
 `gentle-orchestrator`. The orchestrator remains one `--agent` flag away.
 
+The user re-confirmed this after the PR was open, against the earlier recorded choice
+in `odd/tasks/opencode-config-port.md` ("identical to the host, `default_agent:
+gentle-orchestrator` with all 23 agents"). That earlier answer was about porting the
+host configuration, not about delegation, and it never entered a living spec —
+`openspec/specs/` did not mention `default_agent` before this change. The reasoning
+that settled it: `default_agent` is the safety net, so with `build` a caller that
+forgets `--agent` still gets the work done, while with `gentle-orchestrator` forgetting
+it reproduces this incident. And the incident went through the HTTP API, where only
+`default_agent` or an explicit `"agent": "build"` in the body decides — a CLI wrapper
+could not have helped.
+
 ## Tasks
 
 - [x] T1 — Feature document (this file).
@@ -99,7 +110,8 @@ Trade-off accepted: an interactive TUI session now opens on `build` instead of
       `SECURITY.md`.
 - [x] T9 — Verify: build, `--force-recreate`, merged config, CLI end-to-end,
       skill visible on the read-only mount, `docker compose config -q`.
-- [ ] T10 — Commit, push, PR against `main`, assigned to `emiliodavola`.
+- [x] T10 — Commit, push, PR against `main`, assigned to `emiliodavola` →
+      [#20](https://github.com/emiliodavola/robotina/pull/20).
 
 ## Evidence
 
