@@ -436,7 +436,7 @@ contenedor `robotina`. `opencode serve` escucha en **loopback** y Hermes lo alca
 | Alcance | Solo loopback **dentro** del contenedor. El puerto **no** se publica: no lo alcanza el host, ni la LAN, ni ningún par de la red `agents`. |
 | Dirección del flujo | Hermes llama a `http://127.0.0.1:4096`. Al revés no hace falta. |
 | Credenciales | `OPENCODE_SERVER_PASSWORD` es defensa en profundidad (ver abajo). Con la variable presente, el servidor exige HTTP Basic (usuario `opencode`) y Hermes la manda desde su entorno. |
-| Conocimiento | El agente usa el **CLI local** (wrapper en `/opt/robotina/bin/opencode`) y la skill **builtin `opencode`** que trae el vendor, que documenta ese CLI. El repo ya **no** publica una skill propia para OpenCode; `hermes/skills/` solo monta `github-private-repos`, **read-only** en `/opt/data/skills/stack`, así que el agente no puede reescribir estas instrucciones. El resto de su árbol de skills vive en el bind escribible `/opt/data`, que sí puede modificar. |
+| Conocimiento | El agente usa el **CLI local** (wrapper en `/opt/robotina/bin/opencode`) y dos skills para OpenCode: la **builtin `opencode`** del vendor, que documenta ese CLI, y la skill propia del repo `hermes/skills/opencode-delegation/SKILL.md`, que fija el contrato de delegación (agente ejecutor, regla de proveedor/modelo, endpoint no bloqueante y servidor único). `hermes/skills/` monta `github-private-repos` y `opencode-delegation`, **read-only** en `/opt/data/skills/stack`, así que el agente no puede reescribir estas instrucciones. El resto de su árbol de skills vive en el bind escribible `/opt/data`, que sí puede modificar. |
 | Arranque | Un oneshot `opencode-ready` no declara el arranque terminado hasta que `/global/health` responde de verdad; el gate es acotado y con credencial. |
 | Egreso | Sin cambios: `opencode` no tiene ruta propia. Su llamada al modelo aparece como `models.opencode.ai TCP_TUNNEL` en el log del proxy. |
 
@@ -481,11 +481,14 @@ trabajo, y cualquier credencial que haya quedado expuesta así **debe rotarse**.
 catálogo del plan está el endpoint público de modelos (ver «Modelo y plan del proveedor»), que
 no necesita exponer la clave.
 
-Nota: la superficie de conocimiento del agente para OpenCode es la skill **builtin `opencode`**
-que trae el vendor, que documenta el **CLI** — y el CLI ahora sí está disponible en el entorno
-del agente (wrapper en `/opt/robotina/bin/opencode`, que le da la clave propia de OpenCode). El
-repo ya **no** publica una skill propia para OpenCode: la que existía (orientada al endpoint HTTP
-local) se eliminó por duplicar la builtin.
+Nota: la superficie de conocimiento del agente para OpenCode son dos skills: la **builtin
+`opencode`** del vendor, que documenta el **CLI** — y el CLI ahora sí está disponible en el
+entorno del agente (wrapper en `/opt/robotina/bin/opencode`, que le da la clave propia de
+OpenCode) — y la skill propia del repo `hermes/skills/opencode-delegation/SKILL.md`, montada
+**read-only** en `/opt/data/skills/stack`, que documenta el contrato de delegación: el agente
+ejecutor, la regla de proveedor/modelo, el endpoint no bloqueante y el servidor único
+supervisado. La skill anterior, orientada al endpoint HTTP, se había eliminado por duplicar la
+builtin; esta la reemplaza con el contrato corregido para el layout de dos claves.
 
 ## Persistencia: qué vive dónde
 

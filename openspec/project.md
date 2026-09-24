@@ -62,8 +62,7 @@ hermes/
   context/.hermes.md         # highest-priority environment facts, mounted at /workspace/.hermes.md
   skills/                    # repo-local skills, mounted read-only at /opt/data/skills/stack
     github-private-repos/SKILL.md  # PAT usage; the credential split is retired
-    # No agent-facing OpenCode knowledge lives here: the local CLI is documented by
-    # the vendor's builtin `opencode` skill. This repo ships no skill of its own for it.
+    opencode-delegation/SKILL.md   # delegation to the local OpenCode CLI/server: executor agent, provider/model rule, non-blocking endpoint, single supervised server
 squid/
   squid.conf                 # deny private ranges before the allowlist
   allowlist.txt              # the only permitted egress destinations
