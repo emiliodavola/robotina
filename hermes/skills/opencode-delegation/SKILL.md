@@ -56,13 +56,20 @@ get executed. Never delegate a task that must be *done* to `gentle-orchestrator`
 
 ## The model rule
 
-Never hand-pick a `modelID`. Read `GET /config/providers` and pick a model that is
-actually listed there.
+**Never substitute a model.** Read the configured value *before* delegating — the ids
+change over time, so none of them is a constant here.
+
+| Side | Today | Where it is configured |
+| --- | --- | --- |
+| Hermes / robotina | `muse-spark-1.3-contributor` (on promo) | `ROBOTINA_HERMES_MODEL` → `config.yaml` `model.default` |
+| Delegation to OpenCode | `deepseek-v4.1-flash` | `ROBOTINA_OPENCODE_DELEGATE_MODEL` (the `opencode-delegate` default) |
+
+`GET /config/providers` only **confirms** that the configured pair resolves; it does not
+choose.
 
 - `opencode-go` is the provider that resolves credentials in this container, and its
   catalogue holds this stack's models (32 of them).
-- `opencode` resolves no key here: it exposes only its free tier (8 models) and does
-  **not** contain `deepseek-v4.1-flash`.
+- `opencode` resolves no key here: it exposes only its free tier (8 models).
 
 A wrong pair fails with `ProviderModelNotFoundError`, and the HTTP layer surfaces it only
 as `{"name":"UnknownError",...,"ref":"err_…"}` — the real message lives in the server log,
@@ -180,11 +187,11 @@ polling `GET /session/{id}/message` until the last message has an assistant part
 
 ## Models
 
-`GET /config/providers` lists what the server can actually use. Pick the pair from that
-response — never from memory. As configured today, `opencode-go` is the provider that
-resolves credentials here (its default is `gpt-5.6-luna`, and its catalogue holds 32
-models); `opencode` resolves no key, exposes only its free tier (8 models, default
-`big-pickle`), and does not contain `deepseek-v4.1-flash`.
+`GET /config/providers` lists what the server can actually use, and it only confirms the
+pair you already read from the config — never pick from memory. As configured today,
+`opencode-go` is the provider that resolves credentials here (32 models) and the
+delegation model is `deepseek-v4.1-flash`; `opencode` resolves no key, exposes only its
+free tier (8 models, default `big-pickle`), and does not contain `deepseek-v4.1-flash`.
 OpenCode reads and writes the same files you can, and it cannot reach the Internet except
 through the same allowlisted proxy.
 
