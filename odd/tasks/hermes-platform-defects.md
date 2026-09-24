@@ -40,8 +40,8 @@ Measured on 2026-09-24 against the running stack:
 | **A1** sessions stall with `info.finish=null` | **Confirmed (mechanism), not fixed** | `opencode.log` carries `permission=external_directory action.action=ask` entries with no human at the prompt; the skill documents the stall only as a manual troubleshooting row ("abort, do not report a result you never got") — there is no detector. | Yes — poll helper + rule |
 | **A2** blocking `POST /session/{id}/message` used by default | **Confirmed** | `hermes/skills/opencode-delegation/SKILL.md` still leads its *Recipe* with the blocking endpoint; the async path appears only as a footnote, and `hermes/context/.hermes.md` never mentions it. | Yes — docs + helper |
 | **A3** duplicate prompts queued after a cut | **Reported, no log evidence found** | No duplicate-prompt marker in the logs; the defect is plausible (the recipe always creates a fresh session and never checks for an in-flight prompt). Fixed as a defensive rule, not as a proven bug. | Yes — dedupe rule |
-| **A4** model substituted without asking (`gpt-5.6-luna`) | **Confirmed** | `hermes/context/.hermes.md` says only "never invent a model"; it does not state the mandatory delegated model. The skill even names `gpt-5.6-luna` as today's default, which is what a delegator lands on by omission. | Yes — context rule |
-| **A5** `uv run` re-resolves and times out (300 s) vs `.venv/bin/*` (seconds) | **Confirmed** | `.venv/bin` exists in `/workspace/cv-emilio-davola` and `/workspace/sofer`; `robotina/profile.d/robotina-path.sh` appends `/opt/uv/bin` after the venv, and no rule tells the agent to prefer the project venv. | Yes — context rule |
+| **A4** model substituted without asking (`gpt-5.6-luna`) | **Confirmed** | `hermes/context/.hermes.md` says only "never invent a model"; it does not state which model is configured. The skill names `gpt-5.6-luna` as "the default", which is what a delegator lands on by omission. Measured: `.env` sets `ROBOTINA_HERMES_MODEL=muse-spark-1.3-contributor` (a promo) and `config.yaml` has `model.default: "muse-spark-1.3-contributor"`; delegations use `deepseek-v4.1-flash`. The ids change over time, so the rule is "read the configured value", never a hardcoded constant. | Yes — context rule |
+| **A5** `uv run` re-resolves and times out (300 s) vs `.venv/bin/*` (seconds) | **Not applicable (owner correction)** | The owner corrected the framing: there is **no** global preference, it depends on each project. `.venv/bin` exists in `/workspace/cv-emilio-davola` and `/workspace/sofer`, but a project may legitimately declare `uv`. Recorded as a one-line context note ("follow the runner the project declares"), not as a platform defect. | No |
 | **A6** `TMPDIR` points at the pruned scratch, pytest tmpfiles vanish | **Confirmed** | Hermes snapshot exports `TMPDIR="/opt/data/cache/scratch"`; `hermes_constants.py:1052` `SCRATCH_MAX_IDLE_HOURS = 24` + `prune_scratch_dir()`; `doctor_state.py:170` `_PRUNED_CACHE_DIRS = {"scratch","terminal"}`; `export_scratch_tmp_env()` explicitly **never overrides a user-set temp var**, so a compose value wins. | Yes — compose |
 | **A7** `.git/hooks/pre-commit` has CRLF + a Windows `INSTALL_PYTHON` | **Confirmed** | `/workspace/llm-conversation-analyzer/.git/hooks/pre-commit` is CRLF (`^M$`) with `INSTALL_PYTHON='C:\Users\elaze\Desktop\llm-conversation-analyzer\.venv\Scripts\python.exe'`. The `sofer` hook is LF and healthy — the defect is per-repo, not global. | Yes — normalizer + policy |
 | **A8** `HERMES_WRITE_SAFE_ROOT` blocks subagents under `/workspace/sofer` | **Already fixed — no action** | Live: `HERMES_WRITE_SAFE_ROOT=/opt/data/:/workspace/` (PR #23 / issue #22, merged). The report predates the recreate. | No |
@@ -59,21 +59,21 @@ unit, C16). The grouping is by artifact, not by report line:
 | Issue | Covers | Artifact |
 | --- | --- | --- |
 | I1 | A1 + A2 + A3 | `robotina/bin/opencode-delegate` (new), `hermes/skills/opencode-delegation/SKILL.md`, `hermes/context/.hermes.md` |
-| I2 | A4 + A5 | `hermes/context/.hermes.md` (+ skill cross-reference) |
+| I2 | A4 | `hermes/context/.hermes.md`, `hermes/skills/opencode-delegation/SKILL.md`, `compose.yml`, `.env.example` |
 | I3 | A6 | `compose.yml`, `.env.example`, `README.md`, `README.en.md`, `SECURITY.md` |
 | I4 | A7 | `robotina/bin/pre-commit-repair` (new), `hermes/context/.hermes.md`, docs |
 | I5 | A10 | `README.md`, `README.en.md`, `SECURITY.md` |
 
 ## Tasks
 
-- [ ] T1 — Feature document with the measured triage (this file).
-- [ ] T2 — Open the issue set (status:approved, assigned to the owner).
-- [ ] T3 — I1: non-blocking delegation helper with stall detection and no double submit.
-- [ ] T4 — I2: load the mandatory model rule and the venv-binary rule before delegating.
-- [ ] T5 — I3: stable `TMPDIR` outside the pruned scratch.
-- [ ] T6 — I4: repair the CRLF/Windows pre-commit hook without `--no-verify`.
-- [ ] T7 — I5: document the OpenCode log runbook and `GET /event`.
-- [ ] T8 — One PR per issue, each assigned to the owner (no merges).
+- [x] T1 — Feature document with the measured triage (this file).
+- [x] T2 — Open the issue set (status:approved, assigned to the owner): #27–#31.
+- [x] T3 — I1: non-blocking delegation helper with stall detection and no double submit (#27, PR #32).
+- [x] T4 — I2: read the configured model before delegating, never substitute one (#28, PR #33).
+- [x] T5 — I3: stable `TMPDIR` outside the pruned scratch (#29, PR #34).
+- [x] T6 — I4: repair the CRLF/Windows pre-commit hook without `--no-verify` (#30, PR #35).
+- [x] T7 — I5: document the OpenCode log runbook and `GET /event` (#31, PR #36).
+- [x] T8 — One PR per issue, each assigned to the owner (no merges).
 
 ## Acceptance
 
@@ -81,8 +81,30 @@ Per item, the repro → fix → verification triad, run inside the container:
 
 - A1/A2/A3: simulated stall (a turn left with `finish=null`) aborts and is reported without
   waiting for the human; a second identical submit is a no-op; a long turn is submitted async.
-- A4: the mandatory model appears in the context file read before any delegation.
-- A5: `.venv/bin/<tool>` is used when present; `uv run` only when resolution is required.
+- A4: the configured model is read from configuration before any delegation (today Hermes `muse-spark-1.3-contributor`, delegation `deepseek-v4.1-flash`), and no id is hardcoded.
+- A5: not applicable — per-project decision; the context says to follow the runner the project declares.
+
+## Status (2026-09-24)
+
+Issues opened, all labeled `status:approved` and assigned to `emiliodavola`:
+
+| Issue | Report item | PR | Branch |
+| --- | --- | --- | --- |
+| #27 | A1–A3 | #32 | `fix/issue-27-opencode-delegate` |
+| #28 | A4 | #33 | `fix/issue-28-model-rule` |
+| #29 | A6 | #34 | `fix/issue-29-tmpdir` |
+| #30 | A7 | #35 | `fix/issue-30-precommit-repair` |
+| #31 | A10 | #36 | `fix/issue-31-opencode-log-runbook` |
+
+Not opened: A8 (already fixed by PR #23 / issue #22), A9 (vendor/platform, no log evidence), B11
+(verified working), B12 (external quota), C13–C16 (already-applied rules).
+
+No merges. The agent did not restart or recreate the container. `.env.example` was left to the
+owner (the harness blocks `.env*` writes), and must be pasted for `ROBOTINA_OPENCODE_DELEGATE_MODEL`
+(PR #33) and `ROBOTINA_TMPDIR` (PR #34).
+
+Merge-order note: PRs #34, #35 and #36 touch neighbouring regions of `README.md` /
+`README.en.md` (and #34/#36 also `SECURITY.md`); whichever lands second needs a rebase on `main`.
 - A6: `TMPDIR` resolves outside `HERMES_HOME/cache/scratch` and survives a `prune_scratch_dir`.
 - A7: `git commit` succeeds in the affected repo without `--no-verify`.
 - A10: the runbook names the log file and the SSE endpoint, verified by opening both.
