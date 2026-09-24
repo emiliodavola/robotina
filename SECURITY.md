@@ -524,6 +524,19 @@ en un archivo. El redirect anterior a `/var/log/engram.log` fallaba en silencio 
 La salida queda acotada por la rotación `json-file` (10 MB × 3) y se lee con
 `docker compose logs --tail 200 robotina`.
 
+### Temp del agente (`TMPDIR`)
+
+El temp del contenedor esta fijado a `/var/tmp`, **no** al scratch de Hermes. El scratch
+(`HERMES_HOME/cache/scratch`) es un arbol de **cache purgado**: `SCRATCH_MAX_IDLE_HOURS=24` y
+`_PRUNED_CACHE_DIRS={scratch,terminal}`, mas los `rmtree` de `kanban_db_workspace` y
+`session_lost_and_found`. Con `TMPDIR` apuntando ahi, los tmpfiles de una suite de pytest
+desaparecian en el teardown (`FileNotFoundError` al truncar).
+
+`/var/tmp` es disco (no el tmpfs de 256 MB, que Hermes evita justamente para no comerse RAM con
+perfiles de browser y PTY probes), existe con modo `1777` y es escribible por uid 10000. Hermes
+respeta un temp puesto por el usuario: `export_scratch_tmp_env()` solo actua si `TMPDIR` esta
+vacio. Override con `ROBOTINA_TMPDIR` en `.env`.
+
 ### Por qué dos bases van a volumen y no al host
 
 SQLite en modo **WAL** sobre una carpeta de Windows (virtiofs/9p) puede corromperse en
