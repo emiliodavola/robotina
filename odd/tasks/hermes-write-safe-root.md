@@ -96,9 +96,11 @@ Deliberately **not** in scope:
   literal and the effective roots agree.
 - `_is_under` uses a string-prefix test, so a root directory itself is not "under" itself;
   writes target files inside the roots, which is the normal case.
-- A container `ENV` is immutable at runtime, so the running container keeps `/opt/data` until
-  the next `up -d --force-recreate`. The fix was verified by injecting the exact value into a
-  probe process; the running container was **not** restarted (explicit user constraint).
+- A container `ENV` is immutable at runtime, so the value only takes effect after
+  `up -d --force-recreate`. This work verified the guard by injecting the exact value into a
+  probe process and never restarted the container (explicit user constraint); the owner
+  recreated it afterwards, and the live proofs below were then run against the running
+  container.
 
 ## Tasks
 
@@ -111,6 +113,8 @@ Deliberately **not** in scope:
       running and the widened value.
 - [x] T6 — Commit, push, PR against `main`, assigned to `emiliodavola`, linked to #22 →
       [#23](https://github.com/emiliodavola/robotina/pull/23).
+- [x] T7 — Live verification after the owner's `up -d --force-recreate`, against the running
+      container instead of an injected probe.
 
 ## Route declaration
 
@@ -128,6 +132,25 @@ the user. T1, T5 and T6 stay inline as parent bookkeeping and verification.
 | `docker compose config -q` | exit 0 |
 | `ROBOTINA_HERMES_WRITE_SAFE_ROOT= docker compose config --format json \| grep -o '"HERMES_WRITE_SAFE_ROOT": *"[^"]*"'` | `"HERMES_WRITE_SAFE_ROOT": "/opt/data/:/workspace/"` (the compose default, with any `.env` override shadowed) |
 | `docker compose config --format json \| grep -o '"HERMES_WRITE_SAFE_ROOT": *"[^"]*"'` | `"HERMES_WRITE_SAFE_ROOT": "/opt/data/:/workspace/"` (this host, the `.env` override, now in the canonical form) |
+
+### Live verification after the owner's recreate (2026-09-24)
+
+The owner recreated the container (`docker inspect` → `running`, `healthy`). Every AC10 proof
+was then run against the container itself, with no injected environment.
+
+| Probe | Observed |
+| --- | --- |
+| `docker compose exec -T robotina printenv HERMES_WRITE_SAFE_ROOT` | `/opt/data/:/workspace/` |
+| `docker compose exec -T robotina printenv HERMES_HOME` | `/opt/data` |
+| AC10 s2 — workspace allowed, outside every root denied | `True True` |
+| AC10 s3 — `HERMES_HOME` still writable | `True` |
+| AC10 s4 — credential denylist intact | `True True` |
+| AC10 s5 — roots normalized | `['/opt/data', '/workspace']` |
+| Real write as `hermes` in `/workspace/sofer` | probe file written, read back and removed (`uid=10000(hermes)`) |
+| Real write as `hermes` in `/opt/data` | probe file written, read back and removed |
+
+The two real writes are the end-to-end check the original request asked for; both probe files
+were removed after reading them back, so no project file was touched.
 
 ### Finding: `/opt/data/.ssh/id_rsa` is not a stable credential probe
 
