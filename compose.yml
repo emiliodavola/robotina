@@ -161,6 +161,10 @@ services:
       ROBOTINA_HERMES_MODEL: ${ROBOTINA_HERMES_MODEL:-deepseek-v4.1-flash}
       ROBOTINA_HERMES_MODEL_PROVIDER: ${ROBOTINA_HERMES_MODEL_PROVIDER:-opencode-go}
       ROBOTINA_HERMES_MODEL_BASE_URL: ${ROBOTINA_HERMES_MODEL_BASE_URL:-https://opencode.ai/zen/go/v1}
+      # Modelo por defecto de la DELEGACION a OpenCode (NO es secreto, y NO cambia
+      # el modelo de Hermes). Lo lee el helper `opencode-delegate`; es un default
+      # configurable justamente porque los ids del catalogo cambian con el tiempo.
+      ROBOTINA_OPENCODE_DELEGATE_MODEL: ${ROBOTINA_OPENCODE_DELEGATE_MODEL:-deepseek-v4.1-flash}
       # Raiz(es) escribible(s) de las herramientas de archivo de Hermes. La
       # imagen vendor la hornea como `/opt/data/` (= HERMES_HOME), asi que el
       # agente no puede escribir en el proyecto montado en /workspace. Se
