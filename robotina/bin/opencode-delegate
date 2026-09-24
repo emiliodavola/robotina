@@ -1,0 +1,272 @@
+#!/bin/sh
+# Delegacion NO bloqueante al servidor HTTP local de OpenCode (issue #27).
+#
+# Cubre los tres items del reporte:
+#
+#   A2) El turno no puede resolverse esperando en la conexion: `POST
+#       /session/{id}/message` bloquea el request durante todo el turno y, si
+#       el turno nunca cierra, el cliente queda colgado sin forma de mirarlo.
+#       Por eso este helper usa `prompt_async`: el POST arranca el turno en el
+#       server y vuelve enseguida, y el avance lo consultamos por polling.
+#
+#   A1) El turno puede quedarse en `running` para siempre. El caso medido es el
+#       default `external_directory: ask` sin un humano que conteste: la tool
+#       call no termina, `info.finish` queda en null y la sesion ni avanza ni
+#       falla. Como el server no expone un heartbeat aparte, usamos el avance
+#       de los tokens como senal de vida: si la firma de tokens
+#       (input+output+reasoning+cache.read+cache.write) no cambia durante N
+#       polls seguidos y `finish` sigue en null, abortamos el turno.
+#
+#   A3) Reenviar el mismo prompt encola un segundo turno identico, que vuelve a
+#       arrancar de cero. Antes de enviar miramos el ultimo mensaje de rol
+#       `user`: si su texto es identico a la tarea pedida, no se envia nada y
+#       salimos 0.
+#
+# Contrato:
+#   opencode-delegate [--session SID] [--provider ID] [--model ID]
+#                     [--stall-polls N] [--timeout SEC] [--interval SEC]
+#                     <task text...>
+#
+#   OPENCODE_BASE_URL         base del server (default http://127.0.0.1:4096)
+#   OPENCODE_SERVER_PASSWORD  opcional; si esta, se manda HTTP Basic con el
+#                             usuario fijo `opencode` (nunca se imprime)
+#   ROBOTINA_OPENCODE_DELEGATE_MODEL
+#                             modelo por defecto de la delegacion (default
+#                             deepseek-v4.1-flash). Es configuracion, no una
+#                             constante: los defaults del stack cambian.
+#
+# Salidas: 0 turno terminado (`info.finish == "stop"`), 2 stall, 3 error del
+# turno, 4 timeout global, 1 error de uso o de transporte.
+#
+# stdout SOLO lleva el texto de la respuesta; todo diagnostico va a stderr, de
+# modo que el helper se pueda usar en una tuberia sin contaminarla.
+
+set -eu
+
+BASE="${OPENCODE_BASE_URL:-http://127.0.0.1:4096}"
+BASE="${BASE%/}" # sin barra final, para no duplicar "/" al armar las rutas
+
+PROVIDER="opencode-go"
+# El modelo es configuracion movible (hoy deepseek-v4.1-flash): se lee del
+# entorno para no clavar un id que envejece. --model lo sigue pisando.
+MODEL="${ROBOTINA_OPENCODE_DELEGATE_MODEL:-deepseek-v4.1-flash}"
+STALL_POLLS=6
+TIMEOUT=900
+INTERVAL=2
+SESSION=""
+
+# Tope de tiempo por request HTTP. Sin esto, un socket colgado se comeria todo
+# el presupuesto del helper en una sola llamada.
+API_MAX="${OPENCODE_API_TIMEOUT:-30}"
+
+usage() {
+  cat >&2 <<'EOF'
+uso: opencode-delegate [--session SID] [--provider ID] [--model ID]
+                       [--stall-polls N] [--timeout SEC] [--interval SEC]
+                       <task text...>
+EOF
+}
+
+# Credencial: NUNCA se arma un string de opciones de curl en una variable y se
+# expande sin comillas; ahi es donde una password con espacios se parte en
+# argumentos y se filtra. La funcion agrega `-u` solo si la password existe y el
+# valor viaja siempre entre comillas. La password no se imprime ni se registra.
+api() {
+  if [ -n "${OPENCODE_SERVER_PASSWORD:-}" ]; then
+    curl -sS -m "$API_MAX" -u "opencode:$OPENCODE_SERVER_PASSWORD" "$@"
+  else
+    curl -sS -m "$API_MAX" "$@"
+  fi
+}
+
+# Texto del ultimo mensaje de rol `user` (dedupe A3). Unimos los parts de texto:
+# el turno se envia con un unico part, asi que el separador no altera el
+# resultado y no hace falta normalizar.
+last_user_text() {
+  jq -r '([.[] | select(.info.role == "user")] | last // {})
+         | (.parts // [])
+         | map(select(.type == "text") | (.text // ""))
+         | join("")'
+}
+
+# Firma de progreso de un mensaje `assistant`, derivada de sus tokens.
+# Cualquier trabajo real mueve al menos uno de estos contadores; que no se mueva
+# ninguno es la senal de que el turno esta trabado.
+assistant_signature() {
+  jq -r '(.info.tokens // {})
+         | [(.input // 0), (.output // 0), (.reasoning // 0),
+            (.cache.read // 0), (.cache.write // 0)]
+         | map(tostring) | join("/")'
+}
+
+# --- parseo de argumentos ---------------------------------------------------
+while [ $# -gt 0 ]; do
+  case "$1" in
+  --session)
+    [ $# -ge 2 ] || { echo "opencode-delegate: --session necesita un valor" >&2; exit 1; }
+    SESSION="$2"; shift 2 ;;
+  --provider)
+    [ $# -ge 2 ] || { echo "opencode-delegate: --provider necesita un valor" >&2; exit 1; }
+    PROVIDER="$2"; shift 2 ;;
+  --model)
+    [ $# -ge 2 ] || { echo "opencode-delegate: --model necesita un valor" >&2; exit 1; }
+    MODEL="$2"; shift 2 ;;
+  --stall-polls)
+    [ $# -ge 2 ] || { echo "opencode-delegate: --stall-polls necesita un valor" >&2; exit 1; }
+    STALL_POLLS="$2"; shift 2 ;;
+  --timeout)
+    [ $# -ge 2 ] || { echo "opencode-delegate: --timeout necesita un valor" >&2; exit 1; }
+    TIMEOUT="$2"; shift 2 ;;
+  --interval)
+    [ $# -ge 2 ] || { echo "opencode-delegate: --interval necesita un valor" >&2; exit 1; }
+    INTERVAL="$2"; shift 2 ;;
+  --)
+    shift; break ;;
+  -h | --help)
+    usage; exit 0 ;;
+  -*)
+    echo "opencode-delegate: opcion desconocida: $1" >&2; usage; exit 1 ;;
+  *)
+    break ;;
+  esac
+done
+
+TASK="$*"
+if [ -z "$TASK" ]; then
+  usage
+  exit 1
+fi
+
+# --stall-polls y --timeout se usan en comparaciones aritmeticas: exigimos
+# enteros para no caer en un error de sintaxis a mitad del polling.
+case "$STALL_POLLS" in '' | *[!0-9]*) echo "opencode-delegate: --stall-polls invalido: $STALL_POLLS" >&2; exit 1 ;; esac
+case "$TIMEOUT" in '' | *[!0-9]*) echo "opencode-delegate: --timeout invalido: $TIMEOUT" >&2; exit 1 ;; esac
+case "$INTERVAL" in '' | *[!0-9.]*) echo "opencode-delegate: --interval invalido: $INTERVAL" >&2; exit 1 ;; esac
+
+# --- sesion -----------------------------------------------------------------
+# `prompt_async` necesita un id de sesion. Si no vino por --session lo creamos.
+if [ -z "$SESSION" ]; then
+  session_json="$(api -f -X POST "$BASE/session" \
+    -H 'Content-Type: application/json' \
+    -d '{"title":"robotina delegation"}')" ||
+    { echo "opencode-delegate: fallo de transporte creando la sesion" >&2; exit 1; }
+  SESSION="$(printf '%s' "$session_json" | jq -r '.id // empty')"
+  if [ -z "$SESSION" ]; then
+    echo "opencode-delegate: el server no devolvio un id de sesion" >&2
+    exit 1
+  fi
+  # Va a stderr: stdout queda limpio para el texto de la respuesta.
+  echo "session: $SESSION" >&2
+fi
+
+# --- dedupe (A3) ------------------------------------------------------------
+# Leemos los mensajes ANTES de enviar. Si el ultimo mensaje `user` ya tiene
+# exactamente la misma tarea, no reenviamos y salimos 0 (evita el turno duplicado
+# en cola).
+messages="$(api -f "$BASE/session/$SESSION/message")" ||
+  { echo "opencode-delegate: fallo de transporte leyendo mensajes" >&2; exit 1; }
+
+if [ -z "$messages" ] || ! printf '%s' "$messages" | jq -e . >/dev/null 2>&1; then
+  echo "opencode-delegate: respuesta vacia o invalida del server al listar mensajes" >&2
+  exit 1
+fi
+
+previous_user="$(printf '%s' "$messages" | last_user_text)"
+if [ "$previous_user" = "$TASK" ]; then
+  echo "opencode-delegate: la ultima tarea ya es identica; no se reenvia (session: $SESSION)" >&2
+  exit 0
+fi
+
+# Cantidad de mensajes ANTES de encolar la tarea. Sin esto, una sesion reusada
+# cuyo turno anterior ya cerro con `finish=stop` devolveria esa respuesta vieja
+# como si fuera la nueva. El polling solo mira mensajes posteriores a esta marca.
+baseline="$(printf '%s' "$messages" | jq 'length')"
+
+# --- submit no bloqueante (A2) ----------------------------------------------
+# `prompt_async` y no `POST /session/{id}/message`: este ultimo mantendria el
+# request abierto durante todo el turno, que es justo lo que se quiere evitar.
+body="$(jq -n --arg t "$TASK" --arg p "$PROVIDER" --arg m "$MODEL" \
+  '{model:{providerID:$p, modelID:$m}, parts:[{type:"text", text:$t}]}')"
+
+api -f -X POST "$BASE/session/$SESSION/prompt_async" \
+  -H 'Content-Type: application/json' \
+  -d "$body" >/dev/null ||
+  { echo "opencode-delegate: fallo de transporte enviando la tarea" >&2; exit 1; }
+
+# --- polling con deteccion de stall (A1) ------------------------------------
+start_epoch="$(date +%s)"
+prev_sig=""
+stall_count=0
+
+while :; do
+  messages="$(api -f "$BASE/session/$SESSION/message")" ||
+    { echo "opencode-delegate: fallo de transporte durante el polling" >&2; exit 1; }
+
+  # Un cuerpo vacio o no-JSON NUNCA es exito: si el server se cayo a mitad de
+  # camino, jq falla y salimos por transporte, jamas con 0.
+  if [ -z "$messages" ] || ! printf '%s' "$messages" | jq -e . >/dev/null 2>&1; then
+    echo "opencode-delegate: respuesta vacia o invalida durante el polling" >&2
+    exit 1
+  fi
+
+  # Ultimo mensaje `assistant` POSTERIOR a la tarea encolada. Si todavia no
+  # existe, no es un stall (puede estar pensando): lo acota el timeout global.
+  assistant="$(printf '%s' "$messages" | jq -c --argjson b "$baseline" '
+    ([to_entries[] | select(.key >= $b) | .value | select(.info.role == "assistant")] | last // {})')"
+
+  if [ "$assistant" = "{}" ]; then
+    stall_count=0
+    prev_sig=""
+  else
+    finish="$(printf '%s' "$assistant" | jq -r '.info.finish // empty')"
+    turn_error="$(printf '%s' "$assistant" | jq -c '.info.error // empty')"
+
+    # Turno terminado: la respuesta va a stdout y salimos 0.
+    if [ "$finish" = "stop" ]; then
+      printf '%s' "$assistant" | jq -r '(.parts // [])
+        | map(select(.type == "text") | (.text // ""))
+        | join("\n")'
+      exit 0
+    fi
+
+    # Error explicito del turno.
+    if [ -n "$turn_error" ]; then
+      echo "opencode-delegate: error del turno en la session $SESSION: $turn_error" >&2
+      exit 3
+    fi
+
+    # `finish` no nulo y distinto de `stop` es un cierre terminal (p.ej.
+    # `length` por contexto agotado): el turno ya no va a avanzar, asi que no es
+    # un stall y no tiene sentido esperar el timeout global.
+    if [ -n "$finish" ]; then
+      echo "opencode-delegate: el turno cerro con finish=$finish (no stop) en la session $SESSION" >&2
+      exit 3
+    fi
+
+    sig="$(printf '%s' "$assistant" | assistant_signature)"
+
+    # Stall (A1): `finish` sigue en null y la firma de tokens no se movio durante
+    # N polls seguidos. Abortamos del lado server para no dejar un turno zombi.
+    if [ -z "$finish" ] && [ "$sig" = "$prev_sig" ]; then
+      stall_count=$((stall_count + 1))
+    else
+      stall_count=0
+    fi
+    prev_sig="$sig"
+
+    if [ "$stall_count" -ge "$STALL_POLLS" ]; then
+      api -X POST "$BASE/session/$SESSION/abort" >/dev/null 2>&1 || true
+      echo "opencode-delegate: stall en la session $SESSION; tokens congelados en $sig ($STALL_POLLS intervalos sin cambios); turno abortado" >&2
+      exit 2
+    fi
+  fi
+
+  # Timeout global: se agoto el presupuesto sin que el turno cierre.
+  if [ "$(($(date +%s) - start_epoch))" -ge "$TIMEOUT" ]; then
+    api -X POST "$BASE/session/$SESSION/abort" >/dev/null 2>&1 || true
+    echo "opencode-delegate: timeout global de ${TIMEOUT}s en la session $SESSION; turno abortado" >&2
+    exit 4
+  fi
+
+  sleep "$INTERVAL"
+done
