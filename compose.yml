@@ -161,6 +161,14 @@ services:
       ROBOTINA_HERMES_MODEL: ${ROBOTINA_HERMES_MODEL:-deepseek-v4.1-flash}
       ROBOTINA_HERMES_MODEL_PROVIDER: ${ROBOTINA_HERMES_MODEL_PROVIDER:-opencode-go}
       ROBOTINA_HERMES_MODEL_BASE_URL: ${ROBOTINA_HERMES_MODEL_BASE_URL:-https://opencode.ai/zen/go/v1}
+      # Raiz(es) escribible(s) de las herramientas de archivo de Hermes. La
+      # imagen vendor la hornea como `/opt/data` (= HERMES_HOME), asi que el
+      # agente no puede escribir en el proyecto montado en /workspace. Se
+      # AMPLIA, no se reemplaza: es una lista `os.pathsep`-separada (`:`),
+      # /opt/data queda primero y el prefijo del proyecto se suma acotado. NO
+      # abrir `/workspace` entero. Override opcional en .env con la clave
+      # ROBOTINA_HERMES_WRITE_SAFE_ROOT.
+      HERMES_WRITE_SAFE_ROOT: ${ROBOTINA_HERMES_WRITE_SAFE_ROOT:-/opt/data:/workspace/sofer}
       # Sin prompts interactivos de credenciales: falla rapido en lugar de
       # quedarse esperando una respuesta que nunca va a llegar.
       GIT_TERMINAL_PROMPT: "0"
