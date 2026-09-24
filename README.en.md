@@ -223,12 +223,16 @@ docker compose logs --tail 200 robotina
 docker compose exec robotina sh /opt/export-state.sh
 ```
 
-Two operating notes:
+Three operating notes:
 
 - The s6 tools live in `/command`, which is **not** on the container's default
   `PATH`; invoke them with the full path.
 - In Git Bash, use `MSYS_NO_PATHCONV=1` for absolute container paths, so the
   host shell does not rewrite them.
+- The agent's `TMPDIR` is `/var/tmp` (disk, mode `1777`), **not** the
+  `HERMES_HOME/cache/scratch` tree, which is a pruned cache that deletes temp files while they
+  are still in use (with `TMPDIR` pointed there, a pytest suite fails during teardown). To use
+  another destination, pass `ROBOTINA_TMPDIR` in `.env`.
 
 The OpenCode HTTP API (`GET /doc` as OpenAPI, `GET /global/health`,
 `POST /session`, `POST /session/{id}/message` and friends) exists, but it is
