@@ -77,7 +77,8 @@ silenced. Tracked as an open item below.
 - [x] T3 — `openspec/specs/agent-credentials/spec.md`: CR9 with three runnable proofs.
 - [x] T4 — Verify: `sh -n`, `docker compose config -q`, rebuild, `--force-recreate`, the two
       `debug` probes under the hostile `HOME`, and a bounded end-to-end delegation under it.
-- [ ] T5 — Commit, push, PR against `main`, assigned to `emiliodavola`.
+- [x] T5 — Commit, push, PR against `main`, assigned to `emiliodavola` →
+      [#21](https://github.com/emiliodavola/robotina/pull/21).
 - [ ] T6 — Open item: decide whether `external_directory` needs an explicit policy.
 
 ## Route declaration
