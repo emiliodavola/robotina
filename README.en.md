@@ -226,12 +226,26 @@ docker compose exec robotina tail -n 200 /opt/data/.local/share/opencode/log/ope
 docker compose exec robotina sh /opt/export-state.sh
 ```
 
-Two operating notes:
+Three operating notes:
 
 - The s6 tools live in `/command`, which is **not** on the container's default
   `PATH`; invoke them with the full path.
 - In Git Bash, use `MSYS_NO_PATHCONV=1` for absolute container paths, so the
   host shell does not rewrite them.
+- The agent's `TMPDIR` is `/var/tmp` (disk, mode `1777`), **not** the
+  `HERMES_HOME/cache/scratch` tree, which is a pruned cache that deletes temp files while they
+  are still in use (with `TMPDIR` pointed there, a pytest suite fails during teardown). To use
+  another destination, pass `ROBOTINA_TMPDIR` in `.env`.
+
+If a `git commit` inside the container fails because of the `pre-commit` hook (it was installed
+by `pre-commit` on the host, so it carries a Windows `INSTALL_PYTHON` and CRLF endings), do not
+use `--no-verify`: repair the hook with `pre-commit-repair`, which normalizes it to LF and
+repoints it at the project's Linux interpreter. If it finds neither the project's interpreter nor
+`pre-commit` on the `PATH`, it exits 3: run the equivalent checks by hand.
+
+```bash
+docker compose exec robotina sh -c 'cd /workspace/<project> && pre-commit-repair'
+```
 
 The OpenCode HTTP API (`GET /doc` as OpenAPI, `GET /global/health`,
 `POST /session`, `POST /session/{id}/message` and friends) exists, but it is

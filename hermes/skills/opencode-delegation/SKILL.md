@@ -41,6 +41,30 @@ opencode run --agent build -m opencode-go/deepseek-v4-flash \
 → it read the file, edited `return a - b` to `return a + b`, ran its own check, and
 printed `DONE.` (exit 0). Reach for the HTTP endpoint only when a program needs one.
 
+## Non-blocking delegation (use this by default)
+
+`opencode-delegate` is installed at `/opt/robotina/bin/opencode-delegate`. Use it for every task
+that is not a short, single-step prompt:
+
+```sh
+opencode-delegate --provider opencode-go --model deepseek-v4.1-flash \
+  "Add retry logic to the HTTP client and run the tests"
+```
+
+It implements the whole contract so you do not have to:
+
+- submits with `POST /session/{id}/prompt_async` (never the blocking `/message`);
+- polls `GET /session/{id}/message` until the last assistant message has `info.finish == "stop"`;
+- **refuses to resubmit** an identical prompt already present in the session;
+- on a stall (tokens frozen for N polls with `info.finish` still `null`) it aborts the session and
+  reports the stall instead of inventing a result;
+- prints the session id to stderr when it creates the session, and only the answer text to stdout.
+
+Exit codes: `0` finished, `2` stall (aborted), `3` turn error, `4` global timeout, `1` usage or
+transport error. `OPENCODE_BASE_URL` overrides the endpoint (tests point it at a stub);
+`OPENCODE_SERVER_PASSWORD` is picked up when set; `ROBOTINA_OPENCODE_DELEGATE_MODEL` supplies the
+default model.
+
 ## The agent rule (most important)
 
 `gentle-orchestrator` is the Gentle AI SDD orchestrator. Its own prompt says it
@@ -56,13 +80,20 @@ get executed. Never delegate a task that must be *done* to `gentle-orchestrator`
 
 ## The model rule
 
-Never hand-pick a `modelID`. Read `GET /config/providers` and pick a model that is
-actually listed there.
+**Never substitute a model.** Read the configured value *before* delegating — the ids
+change over time, so none of them is a constant here.
+
+| Side | Today | Where it is configured |
+| --- | --- | --- |
+| Hermes / robotina | `muse-spark-1.3-contributor` (on promo) | `ROBOTINA_HERMES_MODEL` → `config.yaml` `model.default` |
+| Delegation to OpenCode | `deepseek-v4.1-flash` | `ROBOTINA_OPENCODE_DELEGATE_MODEL` (the `opencode-delegate` default) |
+
+`GET /config/providers` only **confirms** that the configured pair resolves; it does not
+choose.
 
 - `opencode-go` is the provider that resolves credentials in this container, and its
   catalogue holds this stack's models (32 of them).
-- `opencode` resolves no key here: it exposes only its free tier (8 models) and does
-  **not** contain `deepseek-v4.1-flash`.
+- `opencode` resolves no key here: it exposes only its free tier (8 models).
 
 A wrong pair fails with `ProviderModelNotFoundError`, and the HTTP layer surfaces it only
 as `{"name":"UnknownError",...,"ref":"err_…"}` — the real message lives in the server log,
@@ -71,10 +102,11 @@ issue: that endpoint serializes provider credentials in plain text (see `SECURIT
 
 ## The endpoint rule
 
-`POST /session/{id}/message` is **blocking**: it waits for the whole turn. For anything
-longer than a short task, use `POST /session/{id}/prompt_async` (it returns immediately)
-and poll `GET /session/{id}/message` until the last assistant message has
-`info.finish == "stop"`. Do not hold a synchronous call open across a long agent loop —
+`POST /session/{id}/message` is **blocking**: it waits for the whole turn. Never hand-roll the
+poll loop for a long task — call `opencode-delegate`, which submits with
+`POST /session/{id}/prompt_async` (returns immediately), polls `GET /session/{id}/message` until
+the last assistant message has `info.finish == "stop"`, aborts and reports on a stall, and refuses
+to resubmit an identical prompt. Do not hold a synchronous call open across a long agent loop —
 that is what turns a slow turn into a transport timeout.
 
 ## The one-server rule
@@ -151,7 +183,13 @@ wrong. That failure costs an hour if you don't know it.
 
 ## Recipe
 
-Send one short task and read the answer:
+Long or open-ended task — the normal path:
+
+```sh
+opencode-delegate "Add retry logic to the HTTP client and run the tests"
+```
+
+Short, single-step task, when you want the raw HTTP surface (only if a program needs it):
 
 ```sh
 set --
@@ -164,8 +202,8 @@ SID=$(curl -s "$@" -X POST http://127.0.0.1:4096/session \
 
 curl -s "$@" -X POST "http://127.0.0.1:4096/session/$SID/message" \
   -H 'Content-Type: application/json' \
-  -d '{"model":{"providerID":"opencode-go","modelID":"deepseek-v4-flash"},
-       "parts":[{"type":"text","text":"Add retry logic to the HTTP client and run the tests"}]}' \
+  -d '{"model":{"providerID":"opencode-go","modelID":"deepseek-v4.1-flash"},
+       "parts":[{"type":"text","text":"Reply with OK"}]}' \
   --max-time 900
 ```
 
@@ -173,18 +211,18 @@ Then report the outcome, and show `GET /session/$SID/diff` so the user sees exac
 changed. **Prefer `git status`/`git diff` in `/workspace` as the source of truth for the
 user, not the model's summary.**
 
-Note on long tasks: `/message` blocks until the agent finishes. Give it a generous
-timeout, and if the task is expected to run for many minutes use `/prompt_async` plus
-polling `GET /session/{id}/message` until the last message has an assistant part with
-`info.finish == "stop"`, so a transport timeout does not look like a failure.
+Note on long tasks: `/message` blocks until the agent finishes, so never use it for one. Use
+`opencode-delegate`: it submits with `/prompt_async` and polls until `info.finish == "stop"`, so a
+transport timeout does not look like a failure and a stalled turn is reported instead of waiting
+forever.
 
 ## Models
 
-`GET /config/providers` lists what the server can actually use. Pick the pair from that
-response — never from memory. As configured today, `opencode-go` is the provider that
-resolves credentials here (its default is `gpt-5.6-luna`, and its catalogue holds 32
-models); `opencode` resolves no key, exposes only its free tier (8 models, default
-`big-pickle`), and does not contain `deepseek-v4.1-flash`.
+`GET /config/providers` lists what the server can actually use, and it only confirms the
+pair you already read from the config — never pick from memory. As configured today,
+`opencode-go` is the provider that resolves credentials here (32 models) and the
+delegation model is `deepseek-v4.1-flash`; `opencode` resolves no key, exposes only its
+free tier (8 models, default `big-pickle`), and does not contain `deepseek-v4.1-flash`.
 OpenCode reads and writes the same files you can, and it cannot reach the Internet except
 through the same allowlisted proxy.
 
@@ -197,5 +235,5 @@ through the same allowlisted proxy.
 | `403` with an HTML body mentioning Squid | The URL host is not in `NO_PROXY`, so the call went through the proxy and the allowlist denied it. Use `127.0.0.1`. |
 | `ProviderModelNotFoundError` (the HTTP layer shows only `{"name":"UnknownError",...,"ref":"err_…"}`) | The provider/model pair is wrong. Read `GET /config/providers` and pick a listed pair; the Go key's provider is `opencode-go`, not `opencode`. The real error text is in the server log. |
 | The blocking call times out (`sequential tool terminal timed out after 420.0s`) | You held `POST /session/{id}/message` open across a long agent loop. Switch to `POST /session/{id}/prompt_async` plus polling `GET /session/{id}/message` until `info.finish == "stop"`. |
-| A session stalls: its last part is a `reasoning` part and `info.finish` stays `null` | The turn never converged. Inspect it and abort (`POST /session/{id}/abort`); do **not** report a result you never got. |
+| A session stalls: its last part is a `reasoning` part and `info.finish` stays `null` | The turn never converged. If you delegated with `opencode-delegate` it already aborted and reported the stall (exit 2, frozen token counts). Otherwise inspect it and abort (`POST /session/{id}/abort`); do **not** report a result you never got, and **never** resend the same prompt: check `GET /session/{id}/message` first. |
 | `MCP error -32000: Connection closed` on an MCP server | That server's process died at startup. For local ones, run its command by hand inside the container to see the real error. |
