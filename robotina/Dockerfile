@@ -285,11 +285,13 @@ RUN set -eux; \
     install -m 0755 /opt/robotina-src/opencode-ready.sh /opt/robotina/opencode-ready.sh; \
     install -m 0755 /opt/robotina-src/healthcheck.sh /opt/robotina/healthcheck.sh; \
     install -m 0755 /opt/robotina-src/bin/opencode /opt/robotina/bin/opencode; \
+    install -m 0755 /opt/robotina-src/bin/opencode-delegate /opt/robotina/bin/opencode-delegate; \
     install -m 0755 /opt/robotina-src/profile.d/robotina-path.sh /etc/profile.d/robotina-path.sh; \
     sh -n /opt/robotina/opencode-init.sh; \
     sh -n /opt/robotina/opencode-ready.sh; \
     sh -n /opt/robotina/healthcheck.sh; \
     sh -n /opt/robotina/bin/opencode; \
+    sh -n /opt/robotina/bin/opencode-delegate; \
     sh -n /etc/profile.d/robotina-path.sh; \
     test -d /opt/robotina-src/s6/cont-init.d; \
     for f in /opt/robotina-src/s6/cont-init.d/*; do \
