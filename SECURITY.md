@@ -524,6 +524,31 @@ en un archivo. El redirect anterior a `/var/log/engram.log` fallaba en silencio 
 La salida queda acotada por la rotación `json-file` (10 MB × 3) y se lee con
 `docker compose logs --tail 200 robotina`.
 
+### Log propio de OpenCode
+
+A diferencia de `engram`, OpenCode **si** escribe su propio log, en un archivo:
+`/opt/data/.local/share/opencode/log/opencode.log` (confirmado con `opencode debug paths` -> `log`).
+Es el detalle del server: errores de provider/modelo, `permission=external_directory`, tool calls
+que quedan en `running` y el `ref` de los errores que la HTTP API devuelve como `UnknownError`.
+
+```bash
+docker compose exec robotina tail -n 200 /opt/data/.local/share/opencode/log/opencode.log
+```
+
+El **stream de s6** (`docker compose logs --tail 200 robotina`) es otra cosa: mezcla Hermes,
+engram y opencode, y sirve para arranque y parada. Los dos son necesarios; no son intercambiables.
+
+Para el progreso **en vivo** de una sesion esta `GET /event` (SSE), con el mismo patron de
+credenciales que el healthcheck:
+
+```bash
+docker compose exec robotina sh -c 'set --; [ -n "${OPENCODE_SERVER_PASSWORD:-}" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"; curl -s "$@" http://127.0.0.1:4096/event'
+```
+
+El estado de los servicios supervisados se consulta con `/command/s6-svstat /run/service/opencode`
+(las herramientas de s6 no estan en el `PATH`). Y el recordatorio de siempre: **nunca** pegar el
+cuerpo de `GET /config/providers` en un log, transcript o issue — serializa credenciales en claro.
+
 ### Temp del agente (`TMPDIR`)
 
 El temp del contenedor esta fijado a `/var/tmp`, **no** al scratch de Hermes. El scratch
