@@ -348,30 +348,38 @@ not contradict each other on any measured claim.
 - PROOF: `grep -n "opencode/Dockerfile" openspec/project.md` (no output, exit non-zero) and
   `grep -c "robotina" openspec/project.md` (non-zero)
 
-### Requirement: AC10 — Hermes' write guard covers the workspace project
+### Requirement: AC10 — Hermes' write guard covers the shared workspace
 
 The `robotina` service SHALL set `HERMES_WRITE_SAFE_ROOT` to the `os.pathsep`-separated list
-`/opt/data:/workspace/sofer`, widening the vendor image's `/opt/data`-only default by exactly
-one workspace project prefix. `HERMES_HOME` SHALL remain `/opt/data`, and `/workspace` as a
-whole SHALL NOT become writable.
+`/opt/data/:/workspace/`, widening the vendor image's `/opt/data/`-only default by exactly one
+entry: the shared workspace. Both entries are directories, so both carry a trailing slash.
+`HERMES_HOME` SHALL remain `/opt/data`, and widening the safe root SHALL NOT weaken the
+credential denylist.
 
-#### Scenario: The effective value is the widened list
+#### Scenario: The compose default is the widened list
 
 - GIVEN the change is applied
-- WHEN the compose service environment is rendered
-- THEN `HERMES_WRITE_SAFE_ROOT` resolves to `/opt/data:/workspace/sofer`
-- PROOF: `docker compose config --format json | grep -o '"HERMES_WRITE_SAFE_ROOT": *"[^"]*"'`
-  (prints exactly `"HERMES_WRITE_SAFE_ROOT": "/opt/data:/workspace/sofer"`; the `grep` filter is
-  mandatory so no other resolved `.env` value reaches stdout, and the bare, unfiltered command
-  stays forbidden)
+- WHEN the compose source is read
+- THEN the default value of `HERMES_WRITE_SAFE_ROOT` is `/opt/data/:/workspace/`
+- PROOF: `grep -n 'HERMES_WRITE_SAFE_ROOT:' compose.yml`
+  (shows `${ROBOTINA_HERMES_WRITE_SAFE_ROOT:-/opt/data/:/workspace/}`; the *resolved* value is
+  intentionally not asserted here because a shell environment variable or a `.env` override
+  legitimately takes precedence over the default)
 
-#### Scenario: The guard admits the project and still denies outside it
+#### Scenario: The compose file still validates
+
+- GIVEN the change is applied
+- WHEN compose validates the file
+- THEN the command exits 0 and prints nothing
+- PROOF: `docker compose config -q` (exit 0; the bare `docker compose config` form is forbidden)
+
+#### Scenario: The guard admits the workspace and still denies outside every root
 
 - GIVEN the stack is up with the widened value
 - WHEN the write guard classifies paths
-- THEN a path under `/workspace/sofer` is allowed while a sibling workspace path is denied
+- THEN a path under the workspace is allowed while a path outside every root is denied
 - PROOF:
-  `docker compose exec -T robotina /opt/hermes/.venv/bin/python -c 'import sys; sys.path.insert(0, "/opt/hermes"); from agent.file_safety import get_write_denied_error as d; print(d("/workspace/sofer/tests/conftest.py") is None, d("/workspace/other/x.py") is not None)'`
+  `docker compose exec -T robotina /opt/hermes/.venv/bin/python -c 'import sys; sys.path.insert(0, "/opt/hermes"); from agent.file_safety import get_write_denied_error as d; print(d("/workspace/sofer/tests/conftest.py") is None, d("/tmp/x.py") is not None)'`
   (prints `True True`)
 
 #### Scenario: `HERMES_HOME` and its writes are unchanged
@@ -383,9 +391,20 @@ whole SHALL NOT become writable.
   `docker compose exec -T robotina /opt/hermes/.venv/bin/python -c 'import sys; sys.path.insert(0, "/opt/hermes"); from agent.file_safety import get_write_denied_error as d; print(d("/opt/data/state.txt") is None)'`
   (prints `True`)
 
-#### Scenario: The added prefix is one project, not the whole workspace
+#### Scenario: Widening the safe root does not weaken the credential denylist
 
-- GIVEN the change is applied
-- WHEN the configured value is read from the compose source
-- THEN the list contains `/workspace/sofer` and never a bare `/workspace`
-- PROOF: `grep -n 'HERMES_WRITE_SAFE_ROOT' compose.yml` (the added root is `/workspace/sofer`)
+- GIVEN the stack is up with the widened value
+- WHEN the write guard classifies credential and system paths
+- THEN they stay denied even though `/workspace/` is allowed
+- PROOF:
+  `docker compose exec -T robotina /opt/hermes/.venv/bin/python -c 'import sys; sys.path.insert(0, "/opt/hermes"); from agent.file_safety import get_write_denied_error as d; print(d("/etc/passwd") is not None, d("/opt/data/.env") is not None)'`
+  (prints `True True`)
+
+#### Scenario: A trailing slash is notation, not semantics
+
+- GIVEN the configured value carries a trailing slash on each directory entry
+- WHEN the guard resolves the safe roots
+- THEN it normalizes them to `/opt/data` and `/workspace`
+- PROOF:
+  `docker compose exec -T robotina /opt/hermes/.venv/bin/python -c 'import sys; sys.path.insert(0, "/opt/hermes"); from agent.file_safety import get_safe_write_roots; print(sorted(get_safe_write_roots()))'`
+  (prints `['/opt/data', '/workspace']`)
