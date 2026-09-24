@@ -221,6 +221,16 @@ Dos notas de operación:
 - En Git Bash, para rutas absolutas del contenedor usá
   `MSYS_NO_PATHCONV=1` y evitá que el shell del host te traduzca la ruta.
 
+Si un `git commit` dentro del contenedor falla por el hook de `pre-commit` (lo instaló
+`pre-commit` en el host, así que trae `INSTALL_PYTHON` con ruta Windows y finales CRLF), no uses
+`--no-verify`: repará el hook con `pre-commit-repair`, que lo normaliza a LF y lo reapunta al
+intérprete Linux del proyecto. Si no encuentra un intérprete del proyecto ni `pre-commit` en el
+`PATH`, sale con código 3: corré los chequeos equivalentes a mano.
+
+```bash
+docker compose exec robotina sh -c 'cd /workspace/<proyecto> && pre-commit-repair'
+```
+
 La API HTTP de OpenCode (`GET /doc` como OpenAPI, `GET /global/health`,
 `POST /session`, `POST /session/{id}/message` y compañía) existe, pero **solo
 se alcanza desde adentro del contenedor**, por loopback. Con
