@@ -219,6 +219,9 @@ docker compose exec robotina sh -c 'set --; [ -n "${OPENCODE_SERVER_PASSWORD:-}"
 # Bounded logs (the container stream carries all three processes)
 docker compose logs --tail 200 robotina
 
+# OpenCode's own log (the server detail, not the s6 stream)
+docker compose exec robotina tail -n 200 /opt/data/.local/share/opencode/log/opencode.log
+
 # Export volume-resident state to JSON
 docker compose exec robotina sh /opt/export-state.sh
 ```
@@ -234,6 +237,10 @@ The OpenCode HTTP API (`GET /doc` as OpenAPI, `GET /global/health`,
 `POST /session`, `POST /session/{id}/message` and friends) exists, but it is
 **only reachable from inside the container**, over loopback. With
 `OPENCODE_SERVER_PASSWORD` set it requires HTTP Basic (user `opencode`).
+
+For server-level detail there is a dedicated log at
+`/opt/data/.local/share/opencode/log/opencode.log`, and `GET /event` streams a session's live
+progress (SSE). The full runbook is in `SECURITY.md`.
 
 ## Migration from the previous layout
 
