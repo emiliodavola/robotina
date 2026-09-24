@@ -225,6 +225,16 @@ Tres notas de operación:
   caliente (con `TMPDIR` apuntando ahí, una suite de pytest falla en el teardown). Si querés
   otro destino, pasá `ROBOTINA_TMPDIR` en `.env`.
 
+Si un `git commit` dentro del contenedor falla por el hook de `pre-commit` (lo instaló
+`pre-commit` en el host, así que trae `INSTALL_PYTHON` con ruta Windows y finales CRLF), no uses
+`--no-verify`: repará el hook con `pre-commit-repair`, que lo normaliza a LF y lo reapunta al
+intérprete Linux del proyecto. Si no encuentra un intérprete del proyecto ni `pre-commit` en el
+`PATH`, sale con código 3: corré los chequeos equivalentes a mano.
+
+```bash
+docker compose exec robotina sh -c 'cd /workspace/<proyecto> && pre-commit-repair'
+```
+
 La API HTTP de OpenCode (`GET /doc` como OpenAPI, `GET /global/health`,
 `POST /session`, `POST /session/{id}/message` y compañía) existe, pero **solo
 se alcanza desde adentro del contenedor**, por loopback. Con

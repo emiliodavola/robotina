@@ -1,0 +1,140 @@
+#!/bin/sh
+# pre-commit-repair — repara el hook `pre-commit` roto por el host de Windows.
+#
+# Por que existe: `pre-commit install` corre en el host (Windows) sobre el
+# repositorio montado en /workspace. El hook que escribe queda con dos defectos
+# que el contenedor no puede ejecutar:
+#
+#   1) finales de linea CRLF (cada linea termina en CR), y
+#   2) una linea INSTALL_PYTHON='C:\...\.venv\Scripts\python.exe' que apunta al
+#      interprete de Windows, inexistente adentro del contenedor.
+#
+# El hook estandar resuelve el interprete asi:
+#
+#   if [ -x "$INSTALL_PYTHON" ]; then exec "$INSTALL_PYTHON" -mpre_commit ...;
+#   elif command -v pre-commit; then exec pre-commit ...;
+#   else echo '`pre-commit` not found...'; exit 1; fi
+#
+# Con la ruta Windows el test [ -x ] falla, y si `pre-commit` tampoco esta en el
+# PATH, el commit aborta. La salida correcta NO es --no-verify (eso saltea los
+# checks que el repositorio pidio): es normalizar el hook a LF y reapuntarlo al
+# interprete Linux del proyecto.
+#
+# Uso: pre-commit-repair [--repo PATH]
+#
+# Codigos de salida:
+#   0  el hook ya estaba sano, o quedo reparado y ejecutable
+#   3  quedo reparado pero no hay interprete ni `pre-commit` en PATH: correr los
+#      checks a mano
+#   1  uso invalido, o PATH no es un repositorio git
+#
+# Nunca imprime secretos, nunca invoca `git commit` y no toca nada fuera del
+# hook objetivo (mas su respaldo .legacy).
+
+set -eu
+
+usage() {
+    echo "uso: pre-commit-repair [--repo PATH]" >&2
+}
+
+repo=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --repo)
+            if [ "$#" -lt 2 ]; then
+                usage
+                exit 1
+            fi
+            repo="$2"
+            shift 2
+            ;;
+        --repo=*)
+            repo="${1#--repo=}"
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+# Repo por defecto: el toplevel del directorio actual. Si el usuario paso
+# --repo, se resuelve igual contra git para tolerar subdirectorios.
+if [ -z "$repo" ]; then
+    repo="$(git -C . rev-parse --show-toplevel 2>/dev/null)" || repo=""
+else
+    repo="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" || repo=""
+fi
+
+if [ -z "$repo" ]; then
+    echo "error: no es un repositorio git" >&2
+    exit 1
+fi
+
+hook="$repo/.git/hooks/pre-commit"
+
+if [ ! -f "$hook" ]; then
+    echo "sin hook pre-commit; nada que hacer" >&2
+    exit 0
+fi
+
+# Un hook sano no tiene ningun byte CR y su INSTALL_PYTHON, si existe, apunta a
+# una ruta Linux (sin backslash y sin `.exe`).
+has_cr() {
+    # Comparacion de bytes: si al borrar los CR el tamano baja, habia CR. Es
+    # robusto frente a grep en modo texto (MSYS/Git Bash), que ignora el CR.
+    [ "$(wc -c < "$1")" -ne "$(LC_ALL=C tr -d '\r' < "$1" | wc -c)" ]
+}
+
+bad_install_python() {
+    LC_ALL=C grep -q '^INSTALL_PYTHON=.*\\' "$1" \
+        || LC_ALL=C grep -q '^INSTALL_PYTHON=.*\.exe' "$1"
+}
+
+if ! has_cr "$hook" && ! bad_install_python "$hook"; then
+    echo "hook OK"
+    exit 0
+fi
+
+# Respaldo unico: nunca pisa un .legacy preexistente.
+if [ ! -e "$hook.legacy" ]; then
+    cp -p "$hook" "$hook.legacy"
+fi
+
+# Interprete Linux del proyecto: venv local si existe; si no, cadena vacia para
+# que el hook caiga al `elif command -v pre-commit`.
+interp=""
+if [ -x "$repo/.venv/bin/python" ]; then
+    interp="$repo/.venv/bin/python"
+elif [ -x "$repo/venv/bin/python" ]; then
+    interp="$repo/venv/bin/python"
+fi
+
+# Escritura atomica: temp en el mismo directorio + mv. El helper fija el modo
+# a 0755 (lo mismo que escribe `pre-commit install`); no conserva el modo del
+# hook original.
+tmp="$hook.tmp.$$"
+trap 'rm -f "$tmp"' 0 1 2 15
+# El interprete se pasa como dato por el entorno y awk lo lee de ENVIRON, no
+# como patron de reemplazo: asi un repo con `&`, `|`, `\` o espacios en la ruta
+# no corrompe ni rompe la reescritura. No usamos `awk -v i="$interp"` porque
+# `-v` procesa secuencias de escape y romperia una ruta con backslash.
+tr -d '\r' < "$hook" | IPY="$interp" awk '
+    /^INSTALL_PYTHON=/ { print "INSTALL_PYTHON=\047" ENVIRON["IPY"] "\047"; next }
+    { print }
+' > "$tmp"
+chmod 0755 "$tmp"
+mv -f "$tmp" "$hook"
+
+if [ -z "$interp" ] && ! command -v pre-commit >/dev/null 2>&1; then
+    echo "advertencia: hook reparado pero no ejecutable: no hay interprete de venv ni 'pre-commit' en PATH; corre los checks a mano" >&2
+    exit 3
+fi
+
+echo "hook reparado: CRLF->LF, INSTALL_PYTHON='$interp'" >&2
+exit 0
