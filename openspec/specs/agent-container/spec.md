@@ -347,3 +347,45 @@ not contradict each other on any measured claim.
 - THEN the old build path is gone and the merged name is present
 - PROOF: `grep -n "opencode/Dockerfile" openspec/project.md` (no output, exit non-zero) and
   `grep -c "robotina" openspec/project.md` (non-zero)
+
+### Requirement: AC10 — Hermes' write guard covers the workspace project
+
+The `robotina` service SHALL set `HERMES_WRITE_SAFE_ROOT` to the `os.pathsep`-separated list
+`/opt/data:/workspace/sofer`, widening the vendor image's `/opt/data`-only default by exactly
+one workspace project prefix. `HERMES_HOME` SHALL remain `/opt/data`, and `/workspace` as a
+whole SHALL NOT become writable.
+
+#### Scenario: The effective value is the widened list
+
+- GIVEN the change is applied
+- WHEN the compose service environment is rendered
+- THEN `HERMES_WRITE_SAFE_ROOT` resolves to `/opt/data:/workspace/sofer`
+- PROOF: `docker compose config --format json | grep -o '"HERMES_WRITE_SAFE_ROOT": *"[^"]*"'`
+  (prints exactly `"HERMES_WRITE_SAFE_ROOT": "/opt/data:/workspace/sofer"`; the `grep` filter is
+  mandatory so no other resolved `.env` value reaches stdout, and the bare, unfiltered command
+  stays forbidden)
+
+#### Scenario: The guard admits the project and still denies outside it
+
+- GIVEN the stack is up with the widened value
+- WHEN the write guard classifies paths
+- THEN a path under `/workspace/sofer` is allowed while a sibling workspace path is denied
+- PROOF:
+  `docker compose exec -T robotina /opt/hermes/.venv/bin/python -c 'import sys; sys.path.insert(0, "/opt/hermes"); from agent.file_safety import get_write_denied_error as d; print(d("/workspace/sofer/tests/conftest.py") is None, d("/workspace/other/x.py") is not None)'`
+  (prints `True True`)
+
+#### Scenario: `HERMES_HOME` and its writes are unchanged
+
+- GIVEN the stack is up with the widened value
+- WHEN the Hermes home is read and a path under it is classified
+- THEN the home is `/opt/data` and a write there is allowed
+- PROOF: `docker compose exec -T robotina printenv HERMES_HOME` (prints `/opt/data`) and
+  `docker compose exec -T robotina /opt/hermes/.venv/bin/python -c 'import sys; sys.path.insert(0, "/opt/hermes"); from agent.file_safety import get_write_denied_error as d; print(d("/opt/data/state.txt") is None)'`
+  (prints `True`)
+
+#### Scenario: The added prefix is one project, not the whole workspace
+
+- GIVEN the change is applied
+- WHEN the configured value is read from the compose source
+- THEN the list contains `/workspace/sofer` and never a bare `/workspace`
+- PROOF: `grep -n 'HERMES_WRITE_SAFE_ROOT' compose.yml` (the added root is `/workspace/sofer`)
