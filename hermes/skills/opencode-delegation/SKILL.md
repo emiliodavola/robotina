@@ -53,17 +53,24 @@ opencode-delegate --provider opencode-go --model deepseek-v4.1-flash \
 
 It implements the whole contract so you do not have to:
 
+- pins the executor by sending `"agent"` in the `prompt_async` body (`--agent`, default `build`;
+  env `ROBOTINA_OPENCODE_DELEGATE_AGENT`), so the merged `default_agent` never decides;
 - submits with `POST /session/{id}/prompt_async` (never the blocking `/message`);
-- polls `GET /session/{id}/message` until the last assistant message has `info.finish == "stop"`;
+- follows the turn with the server's own `GET /session/status` (`busy`/`retry` = alive; the session
+  leaving the map = the turn is over) — never with token counts;
+- probes `GET /api/session/{id}/permission` while the turn is alive: a pending permission is a
+  named block — it aborts the session and reports it — instead of inventing a result;
 - **refuses to resubmit** an identical prompt already present in the session;
-- on a stall (tokens frozen for N polls with `info.finish` still `null`) it aborts the session and
-  reports the stall instead of inventing a result;
+- accepts `--directory PATH` to opt a new session into a cwd other than the server's own
+  (`/workspace`; it is never derived from `$PWD`);
 - prints the session id to stderr when it creates the session, and only the answer text to stdout.
 
-Exit codes: `0` finished, `2` stall (aborted), `3` turn error, `4` global timeout, `1` usage or
-transport error. `OPENCODE_BASE_URL` overrides the endpoint (tests point it at a stub);
+Exit codes: `0` finished, `2` blocked by a named condition (aborted), `3` turn error or a closure
+whose `finish` is not `stop`, `4` global timeout, `1` usage or transport error.
+`OPENCODE_BASE_URL` overrides the endpoint (tests point it at a stub);
 `OPENCODE_SERVER_PASSWORD` is picked up when set; `ROBOTINA_OPENCODE_DELEGATE_MODEL` supplies the
-default model.
+default model and `ROBOTINA_OPENCODE_DELEGATE_AGENT` the default agent. `--stall-polls` is still
+accepted and validated for compatibility, deprecated, and no longer affects behaviour.
 
 ## The agent rule (most important)
 
@@ -74,9 +81,10 @@ get executed. Never delegate a task that must be *done* to `gentle-orchestrator`
 - `build` is the executor (native, "The default agent. Executes tools based on configured
   permissions."). This is what you want.
 - `plan` is read-only.
-- The repo overlay sets `default_agent: build`, so the CLI, the HTTP API and the TUI all
-  land on `build` unless overridden — but pass `--agent build` explicitly anyway, so the
-  choice does not depend on configuration drift.
+- `robotina/overlay.json` pins `default_agent: gentle-orchestrator` (the interactive TUI opens
+  on the orchestrator — the decision recorded in commit `3588eef`) — so **every delegation path
+  must name the executor explicitly**: the CLI with `--agent build`, and `opencode-delegate` with
+  its `--agent` flag (default `build`). Never rely on the merged `default_agent`.
 
 ## The model rule
 
@@ -104,10 +112,11 @@ issue: that endpoint serializes provider credentials in plain text (see `SECURIT
 
 `POST /session/{id}/message` is **blocking**: it waits for the whole turn. Never hand-roll the
 poll loop for a long task — call `opencode-delegate`, which submits with
-`POST /session/{id}/prompt_async` (returns immediately), polls `GET /session/{id}/message` until
-the last assistant message has `info.finish == "stop"`, aborts and reports on a stall, and refuses
-to resubmit an identical prompt. Do not hold a synchronous call open across a long agent loop —
-that is what turns a slow turn into a transport timeout.
+`POST /session/{id}/prompt_async` (returns immediately), pins the executor with `"agent"`, follows
+`GET /session/status` for liveness, reads the final message once the turn is over, aborts only on a
+named block (a pending permission), and refuses to resubmit an identical prompt. Do not hold a
+synchronous call open across a long agent loop — that is what turns a slow turn into a transport
+timeout.
 
 ## The one-server rule
 
@@ -139,6 +148,8 @@ Full OpenAPI spec: `GET http://127.0.0.1:4096/doc`. Liveness: `GET /global/healt
 | GET | `/session/{id}/message` | List messages of a session |
 | GET | `/session/{id}/diff` | Working-tree diff of what it changed |
 | GET | `/session/{id}/todo` | Task list it is tracking |
+| GET | `/session/status` | Liveness of every session: `busy`/`retry` = alive, absent = the turn is over |
+| GET | `/api/session/{id}/permission` | Pending permission requests of a session (`{"data":[...]}`; `[]` = none) |
 | POST | `/session/{id}/abort` | Stop it |
 | GET | `/agent` | Agents it exposes (and their descriptions) |
 | GET | `/config/providers` | Providers and models actually available |
@@ -149,6 +160,7 @@ Request body of `POST /session/{id}/message` (or `/prompt_async`):
 
 ```json
 {
+  "agent": "build",
   "parts": [{"type": "text", "text": "<the task>"}],
   "model": {"providerID": "opencode-go", "modelID": "deepseek-v4-flash"}
 }
@@ -156,7 +168,13 @@ Request body of `POST /session/{id}/message` (or `/prompt_async`):
 
 The reply to `/message` is `{"info": {...}, "parts": [...]}` — the answer is the `text`
 in `parts`. `info.finish` should be `"stop"`; `info.tokens` reports usage. With
-`/prompt_async` you get `204` and then poll `GET /session/{id}/message`.
+`/prompt_async` you get `204` and then follow `GET /session/status` until the turn is over
+(`busy`/`retry` while it runs; `idle`, or the session absent from the map, once it ends), then
+read the final assistant message.
+
+`POST /session` takes `agent` in the body and `directory` as a **query parameter**:
+`POST /session?directory=%2Fworkspace` creates a session whose `directory` is `/workspace`.
+`prompt_async` also accepts `agent` in its body, which is how the executor is pinned.
 
 The reply also comes as an event stream on `GET /event` (SSE) if you need progress.
 
@@ -212,9 +230,9 @@ changed. **Prefer `git status`/`git diff` in `/workspace` as the source of truth
 user, not the model's summary.**
 
 Note on long tasks: `/message` blocks until the agent finishes, so never use it for one. Use
-`opencode-delegate`: it submits with `/prompt_async` and polls until `info.finish == "stop"`, so a
-transport timeout does not look like a failure and a stalled turn is reported instead of waiting
-forever.
+`opencode-delegate`: it submits with `/prompt_async`, follows `GET /session/status` for liveness and
+reads the final message once the turn is over, so a transport timeout does not look like a failure
+and a named block is reported instead of waiting forever.
 
 ## Models
 
@@ -234,6 +252,6 @@ through the same allowlisted proxy.
 | `401` | A password is set on the server and the request did not send it — or it sent it with an unquoted `$AUTH` expansion. Use the `set --` pattern above. |
 | `403` with an HTML body mentioning Squid | The URL host is not in `NO_PROXY`, so the call went through the proxy and the allowlist denied it. Use `127.0.0.1`. |
 | `ProviderModelNotFoundError` (the HTTP layer shows only `{"name":"UnknownError",...,"ref":"err_…"}`) | The provider/model pair is wrong. Read `GET /config/providers` and pick a listed pair; the Go key's provider is `opencode-go`, not `opencode`. The real error text is in the server log. |
-| The blocking call times out (`sequential tool terminal timed out after 420.0s`) | You held `POST /session/{id}/message` open across a long agent loop. Switch to `POST /session/{id}/prompt_async` plus polling `GET /session/{id}/message` until `info.finish == "stop"`. |
-| A session stalls: its last part is a `reasoning` part and `info.finish` stays `null` | The turn never converged. If you delegated with `opencode-delegate` it already aborted and reported the stall (exit 2, frozen token counts). Otherwise inspect it and abort (`POST /session/{id}/abort`); do **not** report a result you never got, and **never** resend the same prompt: check `GET /session/{id}/message` first. |
+| The blocking call times out (`sequential tool terminal timed out after 420.0s`) | You held `POST /session/{id}/message` open across a long agent loop. Switch to `POST /session/{id}/prompt_async` plus following `GET /session/status` and reading the final message once the turn is over. |
+| A session stalls: its last part is a `reasoning` part and `info.finish` stays `null` | The turn never converged. If you delegated with `opencode-delegate` it either reports the pending permission (`exit 2`, aborted) or is bounded by the global timeout (`exit 4`) — it no longer guesses from frozen tokens. Otherwise inspect it and abort (`POST /session/{id}/abort`); do **not** report a result you never got, and **never** resend the same prompt: check `GET /session/{id}/message` first. |
 | `MCP error -32000: Connection closed` on an MCP server | That server's process died at startup. For local ones, run its command by hand inside the container to see the real error. |
