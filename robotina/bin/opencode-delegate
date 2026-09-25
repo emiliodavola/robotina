@@ -1,7 +1,7 @@
 #!/bin/sh
-# Delegacion NO bloqueante al servidor HTTP local de OpenCode (issue #27).
+# Delegacion NO bloqueante al servidor HTTP local de OpenCode (issues #27, #38).
 #
-# Cubre los tres items del reporte:
+# Cubre los tres items del reporte original y las dos causas medidas del #38:
 #
 #   A2) El turno no puede resolverse esperando en la conexion: `POST
 #       /session/{id}/message` bloquea el request durante todo el turno y, si
@@ -9,23 +9,38 @@
 #       Por eso este helper usa `prompt_async`: el POST arranca el turno en el
 #       server y vuelve enseguida, y el avance lo consultamos por polling.
 #
-#   A1) El turno puede quedarse en `running` para siempre. El caso medido es el
-#       default `external_directory: ask` sin un humano que conteste: la tool
-#       call no termina, `info.finish` queda en null y la sesion ni avanza ni
-#       falla. Como el server no expone un heartbeat aparte, usamos el avance
-#       de los tokens como senal de vida: si la firma de tokens
-#       (input+output+reasoning+cache.read+cache.write) no cambia durante N
-#       polls seguidos y `finish` sigue en null, abortamos el turno.
+#   A1) El turno puede quedarse en `running` para siempre. El caso medido es
+#       `external_directory: ask` sin un humano que conteste: la tool call no
+#       termina y la sesion ni avanza ni falla. El server SI expone el estado
+#       real del turno, y es de ahi de donde lo leemos: `GET /session/status`
+#       devuelve `busy` mientras el turno vive y saca la sesion del mapa cuando
+#       termina (ausencia = "no esta ocupada", no es un error). Mientras el
+#       turno vive miramos `GET /api/session/{id}/permission`: una permission
+#       pendiente es una espera que ningun humano puede contestar, asi que
+#       abortamos y salimos 2 nombrando el bloqueo.
+#
+#       IMPORTANTE: el detector viejo (firma de tokens de `info.tokens`) se
+#       elimino por medido, no por gusto. OpenCode llena esos contadores recien
+#       cuando un paso CIERRA, asi que durante un step en curso la firma es
+#       identicamente `0/0/0/0/0` haga lo que haga el turno: un `sleep 25` sano
+#       congelaba la firma y el umbral viejo lo abortaba a los ~12 s. La firma
+#       nunca fue una senal de vida.
 #
 #   A3) Reenviar el mismo prompt encola un segundo turno identico, que vuelve a
 #       arrancar de cero. Antes de enviar miramos el ultimo mensaje de rol
 #       `user`: si su texto es identico a la tarea pedida, no se envia nada y
 #       salimos 0.
 #
+#   #38) El turno debe correr sobre un agente EJECUTOR. `robotina/overlay.json`
+#       fija `default_agent: gentle-orchestrator` (la TUI abre ahi, por decision
+#       registrada en el commit 3588eef) y ese agente coordina sub-agentes y no
+#       ejecuta inline. Por eso `prompt_async` manda `"agent"` explicito
+#       (--agent, default `build`): el default mergeado nunca decide.
+#
 # Contrato:
-#   opencode-delegate [--session SID] [--provider ID] [--model ID]
-#                     [--stall-polls N] [--timeout SEC] [--interval SEC]
-#                     <task text...>
+#   opencode-delegate [--session SID] [--agent NAME] [--directory PATH]
+#                     [--provider ID] [--model ID] [--stall-polls N]
+#                     [--timeout SEC] [--interval SEC] <task text...>
 #
 #   OPENCODE_BASE_URL         base del server (default http://127.0.0.1:4096)
 #   OPENCODE_SERVER_PASSWORD  opcional; si esta, se manda HTTP Basic con el
@@ -34,9 +49,12 @@
 #                             modelo por defecto de la delegacion (default
 #                             deepseek-v4.1-flash). Es configuracion, no una
 #                             constante: los defaults del stack cambian.
+#   ROBOTINA_OPENCODE_DELEGATE_AGENT
+#                             agente ejecutor por defecto (default `build`).
 #
-# Salidas: 0 turno terminado (`info.finish == "stop"`), 2 stall, 3 error del
-# turno, 4 timeout global, 1 error de uso o de transporte.
+# Salidas: 0 turno terminado (`info.finish == "stop"`), 2 bloqueo nombrado
+# (permission pendiente; el turno se aborta), 3 error del turno o cierre
+# distinto de `stop`, 4 timeout global, 1 error de uso o de transporte.
 #
 # stdout SOLO lleva el texto de la respuesta; todo diagnostico va a stderr, de
 # modo que el helper se pueda usar en una tuberia sin contaminarla.
@@ -50,10 +68,26 @@ PROVIDER="opencode-go"
 # El modelo es configuracion movible (hoy deepseek-v4.1-flash): se lee del
 # entorno para no clavar un id que envejece. --model lo sigue pisando.
 MODEL="${ROBOTINA_OPENCODE_DELEGATE_MODEL:-deepseek-v4.1-flash}"
+# Agente ejecutor, SIEMPRE explicito: el default mergeado del overlay es
+# `gentle-orchestrator`, que coordina y no ejecuta, asi que delegar sin nombrar
+# agente seria delegar al coordinador. --agent lo pisa.
+AGENT="${ROBOTINA_OPENCODE_DELEGATE_AGENT:-build}"
+# Opt-in y vacio por default: sin --directory la sesion nace en el cwd del
+# server (/workspace). NUNCA se deriva de $PWD: Hermes corre con cwd /opt/data,
+# y un default derivado volveria externo a /workspace y reintroduciria el
+# `external_directory: ask` del #27.
+DIRECTORY=""
+# Deprecado: se acepta (y se valida) para no romper callers viejos, y se ignora.
 STALL_POLLS=6
 TIMEOUT=900
 INTERVAL=2
 SESSION=""
+
+# Polls consecutivos, con el turno ya cerrado, en los que el ultimo mensaje
+# `assistant` todavia no tiene un `finish` final (null o `tool-calls`). Existe
+# porque el flip del status puede ganarle la carrera a la escritura del mensaje
+# final: sin esta ventana, un cierre sano se leeria como error.
+SETTLE_POLLS=3
 
 # Tope de tiempo por request HTTP. Sin esto, un socket colgado se comeria todo
 # el presupuesto del helper en una sola llamada.
@@ -61,9 +95,16 @@ API_MAX="${OPENCODE_API_TIMEOUT:-30}"
 
 usage() {
   cat >&2 <<'EOF'
-uso: opencode-delegate [--session SID] [--provider ID] [--model ID]
-                       [--stall-polls N] [--timeout SEC] [--interval SEC]
+uso: opencode-delegate [--session SID] [--agent NAME] [--directory PATH]
+                       [--provider ID] [--model ID] [--stall-polls N]
+                       [--timeout SEC] [--interval SEC]
                        <task text...>
+
+  --agent NAME       agente ejecutor (default ROBOTINA_OPENCODE_DELEGATE_AGENT
+                     o `build`). Se manda explicito en prompt_async.
+  --directory PATH   cwd de la sesion nueva (default: el del server, /workspace)
+  --stall-polls N    DEPRECADO: ya no afecta el comportamiento; el estado del
+                     server (GET /session/status) es la autoridad de liveness.
 EOF
 }
 
@@ -89,22 +130,19 @@ last_user_text() {
          | join("")'
 }
 
-# Firma de progreso de un mensaje `assistant`, derivada de sus tokens.
-# Cualquier trabajo real mueve al menos uno de estos contadores; que no se mueva
-# ninguno es la senal de que el turno esta trabado.
-assistant_signature() {
-  jq -r '(.info.tokens // {})
-         | [(.input // 0), (.output // 0), (.reasoning // 0),
-            (.cache.read // 0), (.cache.write // 0)]
-         | map(tostring) | join("/")'
-}
-
 # --- parseo de argumentos ---------------------------------------------------
+stall_polls_set=0
 while [ $# -gt 0 ]; do
   case "$1" in
   --session)
     [ $# -ge 2 ] || { echo "opencode-delegate: --session necesita un valor" >&2; exit 1; }
     SESSION="$2"; shift 2 ;;
+  --agent)
+    [ $# -ge 2 ] || { echo "opencode-delegate: --agent necesita un valor" >&2; exit 1; }
+    AGENT="$2"; shift 2 ;;
+  --directory)
+    [ $# -ge 2 ] || { echo "opencode-delegate: --directory necesita un valor" >&2; exit 1; }
+    DIRECTORY="$2"; shift 2 ;;
   --provider)
     [ $# -ge 2 ] || { echo "opencode-delegate: --provider necesita un valor" >&2; exit 1; }
     PROVIDER="$2"; shift 2 ;;
@@ -113,7 +151,7 @@ while [ $# -gt 0 ]; do
     MODEL="$2"; shift 2 ;;
   --stall-polls)
     [ $# -ge 2 ] || { echo "opencode-delegate: --stall-polls necesita un valor" >&2; exit 1; }
-    STALL_POLLS="$2"; shift 2 ;;
+    STALL_POLLS="$2"; stall_polls_set=1; shift 2 ;;
   --timeout)
     [ $# -ge 2 ] || { echo "opencode-delegate: --timeout necesita un valor" >&2; exit 1; }
     TIMEOUT="$2"; shift 2 ;;
@@ -137,16 +175,36 @@ if [ -z "$TASK" ]; then
   exit 1
 fi
 
-# --stall-polls y --timeout se usan en comparaciones aritmeticas: exigimos
-# enteros para no caer en un error de sintaxis a mitad del polling.
-case "$STALL_POLLS" in '' | *[!0-9]*) echo "opencode-delegate: --stall-polls invalido: $STALL_POLLS" >&2; exit 1 ;; esac
+# --timeout y --interval se usan en comparaciones aritmeticas: exigimos enteros
+# para no caer en un error de sintaxis a mitad del polling. --stall-polls ya no
+# se usa, pero se valida igual (entero positivo) para no romper callers viejos.
+if [ "$stall_polls_set" = 1 ]; then
+  case "$STALL_POLLS" in '' | *[!0-9]*) echo "opencode-delegate: --stall-polls invalido: $STALL_POLLS" >&2; exit 1 ;; esac
+  [ "$STALL_POLLS" -ge 1 ] || { echo "opencode-delegate: --stall-polls invalido: $STALL_POLLS (se espera un entero positivo)" >&2; exit 1; }
+  echo "opencode-delegate: --stall-polls esta deprecado y ya no afecta el comportamiento; el estado del server (GET /session/status) es la autoridad de liveness" >&2
+fi
 case "$TIMEOUT" in '' | *[!0-9]*) echo "opencode-delegate: --timeout invalido: $TIMEOUT" >&2; exit 1 ;; esac
 case "$INTERVAL" in '' | *[!0-9.]*) echo "opencode-delegate: --interval invalido: $INTERVAL" >&2; exit 1 ;; esac
+
+# `gentle-orchestrator` coordina sub-agentes y no ejecuta inline: el turno puede
+# no converger. Se avisa, pero NO se rechaza: la escape hatch queda (un caller
+# puede querer orquestacion de verdad).
+if [ "$AGENT" = "gentle-orchestrator" ]; then
+  echo "opencode-delegate: aviso: el agente 'gentle-orchestrator' coordina y no ejecuta inline; el turno puede no converger" >&2
+fi
 
 # --- sesion -----------------------------------------------------------------
 # `prompt_async` necesita un id de sesion. Si no vino por --session lo creamos.
 if [ -z "$SESSION" ]; then
-  session_json="$(api -f -X POST "$BASE/session" \
+  # `directory` viaja como query parameter de POST /session, percent-encoded
+  # (jq es dependencia dura). Vacio = se crea sin el parametro y aplica el cwd
+  # del server.
+  session_url="$BASE/session"
+  if [ -n "$DIRECTORY" ]; then
+    dir_enc="$(printf '%s' "$DIRECTORY" | jq -sRr @uri)"
+    session_url="$BASE/session?directory=$dir_enc"
+  fi
+  session_json="$(api -f -X POST "$session_url" \
     -H 'Content-Type: application/json' \
     -d '{"title":"robotina delegation"}')" ||
     { echo "opencode-delegate: fallo de transporte creando la sesion" >&2; exit 1; }
@@ -182,23 +240,75 @@ fi
 # como si fuera la nueva. El polling solo mira mensajes posteriores a esta marca.
 baseline="$(printf '%s' "$messages" | jq 'length')"
 
-# --- submit no bloqueante (A2) ----------------------------------------------
+# --- submit no bloqueante (A2 + #38) ----------------------------------------
 # `prompt_async` y no `POST /session/{id}/message`: este ultimo mantendria el
 # request abierto durante todo el turno, que es justo lo que se quiere evitar.
-body="$(jq -n --arg t "$TASK" --arg p "$PROVIDER" --arg m "$MODEL" \
-  '{model:{providerID:$p, modelID:$m}, parts:[{type:"text", text:$t}]}')"
+# `agent` viaja explicito para que el `default_agent` mergeado no decida.
+body="$(jq -n --arg t "$TASK" --arg p "$PROVIDER" --arg m "$MODEL" --arg a "$AGENT" \
+  '{agent:$a, model:{providerID:$p, modelID:$m}, parts:[{type:"text", text:$t}]}')"
 
 api -f -X POST "$BASE/session/$SESSION/prompt_async" \
   -H 'Content-Type: application/json' \
   -d "$body" >/dev/null ||
   { echo "opencode-delegate: fallo de transporte enviando la tarea" >&2; exit 1; }
 
-# --- polling con deteccion de stall (A1) ------------------------------------
+# --- polling: liveness del server + decision terminal del mensaje -----------
 start_epoch="$(date +%s)"
-prev_sig=""
-stall_count=0
+settle_count=0
 
 while :; do
+  # Estado del turno segun el server, que es la unica autoridad de liveness.
+  # Tres casos distintos, y la distincion importa:
+  #   - `busy`/`retry`       -> el turno vive.
+  #   - `idle`/`absent`      -> el server dice que el turno cerro. `absent` es
+  #     el estado normal de fin: la sesion sale del mapa de `GET /session/status`
+  #     cuando termina. NO es lo mismo que un status ilegible.
+  #   - `unknown`            -> no se pudo leer el status (request o cuerpo).
+  # Si el request o el cuerpo fallan, degradamos a `unknown` y seguimos: un
+  # status ilegible no puede matar un turno sano (lo acota el timeout global).
+  status_type="unknown"
+  if status_json="$(api -f "$BASE/session/status" 2>/dev/null)"; then
+    if printf '%s' "$status_json" | jq -e . >/dev/null 2>&1; then
+      # Envolver la asignacion en un `if` es a proposito: un `x="$(...)"` pelado
+      # que falla muere por `set -e`. `has` distingue "la sesion no esta en el
+      # mapa" (absent) de "no se pudo leer" (unknown).
+      if st="$(printf '%s' "$status_json" | jq -r --arg s "$SESSION" 'if has($s) then (.[$s].type // "unknown") else "absent" end' 2>/dev/null)"; then
+        status_type="${st:-unknown}"
+      fi
+    fi
+  fi
+
+  # `turn_alive` gobierna la sonda de permission; `status_over` gobierna la
+  # ventana de asentamiento, que SOLO aplica cuando el server ya dijo que el
+  # turno cerro. Un status ilegible no es un cierre.
+  case "$status_type" in
+  busy | retry) turn_alive=1; status_over=0 ;;
+  idle | absent) turn_alive=0; status_over=1 ;;
+  *) turn_alive=0; status_over=0 ;;
+  esac
+
+  # Bloqueo nombrado (A1): mientras el turno vive, una permission pendiente es
+  # una espera que ningun humano va a contestar. Abortamos y salimos 2 diciendo
+  # cual. La sonda es best-effort: el endpoint puede no existir (server viejo) o
+  # devolver algo ilegible, y eso NUNCA debe romper el turno.
+  if [ "$turn_alive" = 1 ]; then
+    perms=""
+    if perms="$(api -f "$BASE/api/session/$SESSION/permission" 2>/dev/null)"; then :; else perms=""; fi
+    if [ -n "$perms" ] && printf '%s' "$perms" | jq -e '(.data // []) | length > 0' >/dev/null 2>&1; then
+      api -X POST "$BASE/session/$SESSION/abort" >/dev/null 2>&1 || true
+      echo "opencode-delegate: el turno quedo bloqueado esperando una permission que ningun humano puede contestar (session: $SESSION); turno abortado" >&2
+      # Detalle shape-proof: si `resources` viniera con una forma que `join` no
+      # acepta, un jq que falla mataria el script por `set -e` antes del exit 2 y
+      # el caller veria un codigo equivocado en vez del bloqueo nombrado. Por eso
+      # `tostring` + `[]?` + `|| true`.
+      printf '%s' "$perms" | jq -r '(.data // [])[]? | "  - " + ((.action // "?") | tostring) + " " + ((.resources // []) | tostring)' >&2 || true
+      exit 2
+    fi
+  fi
+
+  # Mensajes para la decision terminal. Solo cuenta el ultimo `assistant`
+  # POSTERIOR al baseline: una sesion reusada no puede devolver la respuesta
+  # vieja como si fuera la nueva.
   messages="$(api -f "$BASE/session/$SESSION/message")" ||
     { echo "opencode-delegate: fallo de transporte durante el polling" >&2; exit 1; }
 
@@ -209,17 +319,28 @@ while :; do
     exit 1
   fi
 
-  # Ultimo mensaje `assistant` POSTERIOR a la tarea encolada. Si todavia no
-  # existe, no es un stall (puede estar pensando): lo acota el timeout global.
   assistant="$(printf '%s' "$messages" | jq -c --argjson b "$baseline" '
     ([to_entries[] | select(.key >= $b) | .value | select(.info.role == "assistant")] | last // {})')"
 
   if [ "$assistant" = "{}" ]; then
-    stall_count=0
-    prev_sig=""
+    # Todavia no hay mensaje `assistant` posterior a la tarea: no es una falla,
+    # puede estar pensando. Lo acota el timeout global.
+    settle_count=0
+  elif [ "$turn_alive" = 1 ]; then
+    # Turno vivo: la espera es normal. Cualquier poll que vea el turno vivo
+    # resetea la ventana de asentamiento.
+    settle_count=0
   else
+    # El server ya dice que el turno cerro (o no sabemos leer el status): recien
+    # ahora tiene sentido leer el veredicto del mensaje.
     finish="$(printf '%s' "$assistant" | jq -r '.info.finish // empty')"
     turn_error="$(printf '%s' "$assistant" | jq -c '.info.error // empty')"
+
+    # Error explicito del turno.
+    if [ -n "$turn_error" ]; then
+      echo "opencode-delegate: error del turno en la session $SESSION: $turn_error" >&2
+      exit 3
+    fi
 
     # Turno terminado: la respuesta va a stdout y salimos 0.
     if [ "$finish" = "stop" ]; then
@@ -229,42 +350,38 @@ while :; do
       exit 0
     fi
 
-    # Error explicito del turno.
-    if [ -n "$turn_error" ]; then
-      echo "opencode-delegate: error del turno en la session $SESSION: $turn_error" >&2
-      exit 3
-    fi
-
-    # `finish` no nulo y distinto de `stop` es un cierre terminal (p.ej.
-    # `length` por contexto agotado): el turno ya no va a avanzar, asi que no es
-    # un stall y no tiene sentido esperar el timeout global.
-    if [ -n "$finish" ]; then
+    if [ -z "$finish" ] || [ "$finish" = "tool-calls" ]; then
+      # `finish` ausente o intermedio (`tool-calls` cae en CADA mensaje assistant
+      # intermedio, medido) con el turno ya cerrado segun el server: ventana de
+      # asentamiento. El flip del status puede ganarle la carrera a la escritura
+      # del mensaje final, asi que esperamos unos polls antes de declarar el
+      # cierre. SOLO aplica cuando el server dijo que el turno cerro
+      # (`idle`/`absent`): un status ilegible (`unknown`) NO es un cierre, porque
+      # un step en curso mantiene `finish=null` mientras corre su tool (medido:
+      # 28 s), y leerlo como cierre daria un exit 3 falso a los 3 polls.
+      if [ "$status_over" = 1 ]; then
+        settle_count=$((settle_count + 1))
+        if [ "$settle_count" -ge "$SETTLE_POLLS" ]; then
+          echo "opencode-delegate: el turno cerro sin mensaje final (finish=${finish:-null}) en la session $SESSION" >&2
+          exit 3
+        fi
+      else
+        settle_count=0
+      fi
+    else
+      # `finish` no nulo y distinto de `stop`/`tool-calls` (p.ej. `length` por
+      # contexto agotado): cierre terminal, no hay nada mas que esperar. Se
+      # decide aunque el status no se pueda leer.
       echo "opencode-delegate: el turno cerro con finish=$finish (no stop) en la session $SESSION" >&2
       exit 3
     fi
-
-    sig="$(printf '%s' "$assistant" | assistant_signature)"
-
-    # Stall (A1): `finish` sigue en null y la firma de tokens no se movio durante
-    # N polls seguidos. Abortamos del lado server para no dejar un turno zombi.
-    if [ -z "$finish" ] && [ "$sig" = "$prev_sig" ]; then
-      stall_count=$((stall_count + 1))
-    else
-      stall_count=0
-    fi
-    prev_sig="$sig"
-
-    if [ "$stall_count" -ge "$STALL_POLLS" ]; then
-      api -X POST "$BASE/session/$SESSION/abort" >/dev/null 2>&1 || true
-      echo "opencode-delegate: stall en la session $SESSION; tokens congelados en $sig ($STALL_POLLS intervalos sin cambios); turno abortado" >&2
-      exit 2
-    fi
   fi
 
-  # Timeout global: se agoto el presupuesto sin que el turno cierre.
+  # Timeout global: se agoto el presupuesto sin que el turno cierre. Se informa
+  # el ultimo status observado antes de abortar, como diagnostico extra.
   if [ "$(($(date +%s) - start_epoch))" -ge "$TIMEOUT" ]; then
+    echo "opencode-delegate: timeout global de ${TIMEOUT}s en la session $SESSION (ultimo status: $status_type); turno abortado" >&2
     api -X POST "$BASE/session/$SESSION/abort" >/dev/null 2>&1 || true
-    echo "opencode-delegate: timeout global de ${TIMEOUT}s en la session $SESSION; turno abortado" >&2
     exit 4
   fi
 
