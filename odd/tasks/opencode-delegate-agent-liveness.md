@@ -122,8 +122,10 @@ with a runnable shell proof (this repo has no test runner — `openspec/config.y
       running server (the `sleep 30` fixture); `docker compose config -q`; the `--directory`
       opt-in path. Every observed value is recorded below.
 - [x] T7 — Work-unit commits on a feature branch, Conventional Commits, `(#38)`.
-- [ ] T8 — Push the branch and open the PR against `main`, assigned — **only if the user
-      asks**; push and PR stay user decisions.
+- [x] T8 — Push the branch and open the PR against `main`, assigned — the user asked for it, with
+      an **explicit size exception** (579 added lines vs the repo's 400-line budget;
+      `exception_ok: false` means it is never inferred). →
+      [#39](https://github.com/emiliodavola/robotina/pull/39).
 
 ## Route declaration
 
@@ -178,4 +180,8 @@ Two spec defects found by verification and fixed before committing:
    positive integer and exits 1 otherwise. Reworded to "accepted and validated for compatibility,
    deprecated, and no longer affects behaviour".
 
-T8 (push + PR) is deliberately not done: push and PR remain user decisions.
+T8 was closed on request: [#39](https://github.com/emiliodavola/robotina/pull/39), one PR against
+`main` with the explicit size exception. The native review of the candidate did not run: the RDD
+preflight is blocked by a facade/native schema mismatch (the committed-range START returns
+`schema-incompatible` with no lineage created and no mutation; the ordinary START yields an empty
+candidate whose base-ref slot the capture tool rejects). No recovery route was touched.
