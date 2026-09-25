@@ -11,6 +11,11 @@ coordinates sub-agents and never executes inline, and Hermes held the blocking
 replacement for the stack-specific knowledge deleted in commit `6ec5fad`
 (`hermes/skills/opencode-server/SKILL.md`).
 
+Issue #38 added a second measured lesson to the same domain: a turn's liveness cannot be inferred
+from its token counters (OpenCode fills them only when a step closes, so an in-progress step reads
+`0/0/0/0/0` while it works), and the delegation path must pin the executor itself, because the
+merged `default_agent` is the coordinating agent on purpose.
+
 Artifact language: English.
 
 ## Verification model
@@ -44,29 +49,68 @@ Every scenario names the exact shell-level observation that proves it.
   config-less state there, and a delegation fails with a bare
   `{"name":"UnknownError",…,"ref":"err_…"}`. HTTP probes do not need this; they talk to the
   already-running supervised server.
+- **The helper is baked into the image.** `robotina/Dockerfile` copies `robotina/bin/`, and
+  `/opt/robotina/bin/opencode-delegate` is not a bind mount, so a proof that invokes it inside the
+  container exercises the image's copy, not the working tree. Any change to the helper needs a
+  rebuild **and** `--force-recreate` before its scenarios can pass; until then the checked-out file
+  is exercised equivalently with
+  `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -s -- <args> < robotina/bin/opencode-delegate`.
+  Reporting the literal command as a pass against a stale image is a vacuous pass and is forbidden;
+  the md5 of the container copy against `git show HEAD:robotina/bin/opencode-delegate` and against
+  the working-tree file proves which code ran.
 
 ## Requirements
 
-### Requirement: OD1 — The merged configuration selects an executing agent as `default_agent`
+### Requirement: OD1 — Every delegation path names the executor explicitly
 
-The merged `/opt/data/.config/opencode/opencode.json` SHALL set `default_agent` to an agent
-that executes (`build`), and SHALL NOT leave it on the coordinating agent
-(`gentle-orchestrator`).
+`robotina/overlay.json` MAY pin `default_agent` to the coordinating agent
+(`gentle-orchestrator`) so the interactive TUI opens there, and the merged configuration SHALL
+expose a non-empty `default_agent`. Because that default does not have to execute, **every
+delegation path that must get work done SHALL name the executor explicitly**: the CLI with
+`--agent build`, and `opencode-delegate` with `agent` in its `prompt_async` body (its `--agent`
+flag, default `build`). A delegated turn SHALL therefore run on `build` even when the merged
+`default_agent` is `gentle-orchestrator`.
 
-#### Scenario: The merged configuration names the executor
+Rationale, measured: the helper sent `{model, parts}` only, both sessions of issue #38 ran with
+`info.agent = "gentle-orchestrator"`, and `gentle-orchestrator` coordinates sub-agents instead of
+executing. Commit `3588eef` pins the orchestrator as the config default on purpose, so the
+invariant lives in the delegation path and not in the config default.
+
+#### Scenario: The merged configuration exposes a non-empty default agent
 
 - GIVEN the stack is up and the image has been rebuilt and the container force-recreated
 - WHEN the merged config's `default_agent` is read inside the container
-- THEN it prints `build` and does not print `gentle-orchestrator`
+- THEN it prints a non-empty value (today `gentle-orchestrator`)
 - PROOF: `docker compose exec -T robotina python3 -c "import json;print(json.load(open('/opt/data/.config/opencode/opencode.json')).get('default_agent'))"`
-  (output MUST be exactly `build`; empty output or `gentle-orchestrator` is a FAILURE)
+  (empty output is a FAILURE; the value itself is configuration and MUST NOT be asserted)
 
 #### Scenario: The repo overlay is the source of that key
 
 - GIVEN the change is applied
 - WHEN the source overlay is searched for the key
-- THEN the `"default_agent": "build"` line is present
-- PROOF: `grep -n '"default_agent": "build"' robotina/overlay.json` (non-empty; an empty match is a FAILURE)
+- THEN a `"default_agent"` line is present
+- PROOF: `grep -n '"default_agent"' robotina/overlay.json` (non-empty; an empty match is a FAILURE)
+
+#### Scenario: The helper sends the agent in the request body
+
+- GIVEN the change is applied
+- WHEN the helper's submit body is searched
+- THEN the body carries the agent field
+- PROOF: `grep -c 'agent:$a' robotina/bin/opencode-delegate` (must be ≥ 1; 0 is a FAILURE)
+
+#### Scenario: A delegated turn lands on the executor, not on the merged default
+
+- GIVEN the stack is up and the merged `default_agent` is the coordinating agent
+- WHEN a delegation is made through `opencode-delegate` and its session messages are read
+- THEN the last assistant message reports `agent == "build"`
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina /opt/robotina/bin/opencode-delegate --timeout 180 "Reply with exactly OK"`
+  (capture the `session: ses_…` line it prints to stderr), then
+  `MSYS_NO_PATHCONV=1 docker compose exec -T robotina sh -c 'set --; [ -n "${OPENCODE_SERVER_PASSWORD:-}" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"; curl -fsS "$@" -m 10 "http://127.0.0.1:4096/session/<SID>/message" | jq -r "[.[] | select(.info.role==\"assistant\")] | last | .info.agent"'`
+  (must print `build`; `gentle-orchestrator` or empty is a FAILURE. It is non-vacuous only while
+  the merged default is the orchestrator, which is the case this requirement exists for)
+- NOTE: the helper in the running container comes from the image, so this scenario needs the
+  rebuild + force-recreate described in the verification model; before that, exercise the
+  checked-out file with the equivalent `sh -s -- <args> < robotina/bin/opencode-delegate` form.
 
 ### Requirement: OD2 — `gentle-orchestrator` stays reachable and still declares it does not execute
 
@@ -181,3 +225,117 @@ listener SHALL exist on any other port (in particular `4097`).
   (must be 0) together with the same listing's `grep -c ':4096'` (must be ≥ 1, the control that
   proves the listing is real). If neither tool exists, the scenario is skipped as
   inconclusive, never reported as passing.
+
+### Requirement: OD6 — A long tool call does not abort a healthy turn
+
+`opencode-delegate` SHALL use the server's own session status (`GET /session/status`) as its
+liveness signal and SHALL NOT abort a turn whose tool call outlives any fixed poll threshold. The
+removed rule (`info.tokens` frozen for `STALL_POLLS` polls) SHALL NOT return: OpenCode fills those
+counters only when a step closes, so during an in-progress step the signature is identically
+`0/0/0/0/0` no matter what the turn does — measured: a healthy `sleep 25` froze it for 28 s while a
+`glob` completed inside the same message.
+
+#### Scenario: A 30 s tool call finishes
+
+- GIVEN the stack is up
+- WHEN a delegation asks for a 30 s tool call
+- THEN the helper exits 0 and prints the answer
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina /opt/robotina/bin/opencode-delegate --timeout 180 "Run the shell command sleep 30 and then reply with exactly DONE"`
+  (must exit `0` and print `DONE`; exit `2` or `4` is a FAILURE)
+
+#### Scenario: The token-signature rule is gone and the status endpoint is used
+
+- GIVEN the change is applied
+- WHEN the helper's source is searched
+- THEN the old signature function is absent and the status endpoint is present
+- PROOF: `grep -c 'assistant_signature' robotina/bin/opencode-delegate` (must be 0) together with
+  `grep -c 'session/status' robotina/bin/opencode-delegate` (must be ≥ 1)
+
+#### Scenario: The non-vacuous control — the flag that used to trigger the abort is inert
+
+- GIVEN the same 30 s tool call
+- WHEN the delegation is repeated with `--stall-polls 6`, the exact threshold that aborted the
+  healthy turn before this change
+- THEN it still exits 0
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina /opt/robotina/bin/opencode-delegate --stall-polls 6 --timeout 180 "Run the shell command sleep 30 and then reply with exactly DONE"`
+  (must exit `0` and print `DONE`; the deprecation warning on stderr is informational and is NOT
+  the assertion)
+
+### Requirement: OD7 — An intermediate `finish=tool-calls` is not a terminal closure
+
+`opencode-delegate` SHALL NOT treat `info.finish == "tool-calls"` as the end of a turn. Measured:
+`tool-calls` lands on every intermediate assistant message and the next assistant message is created
+right after it, so reading that value as a closure aborts a turn that is still working.
+
+#### Scenario: A two-step turn closes on `stop` and still exits 0
+
+- GIVEN a delegation whose turn needs a tool call and then a final answer
+- WHEN the helper finishes and its session messages are read
+- THEN the helper exited 0, and the session's assistant messages go from `tool-calls` to `stop`
+- PROOF: run the 30 s tool-call delegation of OD6, capture the `session: ses_…` line from stderr,
+  then
+  `MSYS_NO_PATHCONV=1 docker compose exec -T robotina sh -c 'set --; [ -n "${OPENCODE_SERVER_PASSWORD:-}" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"; curl -fsS "$@" -m 10 "http://127.0.0.1:4096/session/<SID>/message" | jq -c "[.[] | select(.info.role==\"assistant\") | .info.finish]"'`
+  (must print a list whose first element is `"tool-calls"` and whose last element is `"stop"`,
+  while the delegation itself exited `0`)
+
+### Requirement: OD8 — A named block is reported instead of guessed
+
+While the turn is alive, `opencode-delegate` SHALL probe the session's pending permission requests
+(`GET /api/session/{id}/permission`); a non-empty result SHALL abort the session and exit `2`,
+naming the block on stderr. The probe SHALL be best-effort: an unavailable or unparsable response
+SHALL NOT fail the turn.
+
+#### Scenario: The helper probes the pending-permission endpoint
+
+- GIVEN the change is applied
+- WHEN the helper's source is searched
+- THEN the pending-permission endpoint is present
+- PROOF: `grep -c '/permission' robotina/bin/opencode-delegate` (must be ≥ 1; 0 is a FAILURE)
+
+#### Scenario: A pending permission aborts with exit 2 and names the block (conditional)
+
+- GIVEN a delegation whose tool call reaches a permission rule set to `ask` in
+  `robotina/overlay.json` (`bash: git commit *`) and no human to answer it
+- WHEN the helper polls
+- THEN it aborts the session and exits `2`, with the pending permission on stderr
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina /opt/robotina/bin/opencode-delegate --timeout 120 "Run exactly this shell command: git commit --allow-empty -m probe. Then reply with exactly DONE"`
+  (must exit `2` and print the pending permission on stderr)
+- NOTE: this scenario needs the fixture to actually reach the `ask` rule. A model that rewrites the
+  command (measured: one run emitted `rtk git commit --allow-empty -m probe`, which does not match
+  the rule) leaves nothing pending and the run then ends on the global timeout. If no permission ask
+  can be produced in the run, the scenario is skipped as **inconclusive**, never reported as
+  passing.
+
+### Requirement: OD9 — `--directory` is opt-in and never derived from the caller's cwd
+
+`opencode-delegate` SHALL create its session in the server's own cwd (`/workspace`) unless
+`--directory PATH` is given, and SHALL send that path as the `directory` query parameter of
+`POST /session`, percent-encoded. It SHALL NOT derive the session cwd from `$PWD`: Hermes runs with
+cwd `/opt/data`, so a derived default would make `/workspace` an external directory and reintroduce
+the `external_directory: ask` hang of the original incident.
+
+#### Scenario: Without the flag the session uses the server's cwd
+
+- GIVEN a delegation made with no `--directory`
+- WHEN the created session is read
+- THEN its `directory` is `/workspace`
+- PROOF: run any delegation, capture the `session: ses_…` line, then
+  `MSYS_NO_PATHCONV=1 docker compose exec -T robotina sh -c 'set --; [ -n "${OPENCODE_SERVER_PASSWORD:-}" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"; curl -fsS "$@" -m 10 "http://127.0.0.1:4096/session/<SID>" | jq -r .directory'`
+  (must print `/workspace`)
+
+#### Scenario: The caller's cwd does not leak into the session
+
+- GIVEN a delegation invoked from a different cwd (`/tmp`) with no `--directory`
+- WHEN the created session is read
+- THEN its `directory` is still `/workspace`
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -c 'cd /tmp && /opt/robotina/bin/opencode-delegate --timeout 180 "Reply with exactly OK"'`
+  (capture the session id, then read `.directory` as above; anything other than `/workspace` is a
+  FAILURE)
+
+#### Scenario: `--directory` opts into another root
+
+- GIVEN a delegation with `--directory /tmp`
+- WHEN the created session is read
+- THEN its `directory` is `/tmp`
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina /opt/robotina/bin/opencode-delegate --directory /tmp --timeout 180 "Reply with exactly OK"`
+  (capture the session id, then read `.directory` as above; must print `/tmp`)
