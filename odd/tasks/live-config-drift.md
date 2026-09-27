@@ -113,7 +113,9 @@ Until then, `--dry-run` is the only reconcile command that runs.
       (`compose.yml`, `30-robotina-model`, `README.md`, `README.en.md`, `SECURITY.md`), with the
       "cheapest model of the catalogue" policy written down.
 - [x] T6 — Record the deferred recreate and its gate (see § Deferred above).
-- [ ] T7 — Push the branch and open the PR against `main`, assigned to `emiliodavola`.
+- [x] T7 — Push the branch and open the PR against `main`, assigned to `emiliodavola`: **PR #53**
+      (4 commits: tracker, allowlist, model default, security docs). Static validation
+      (`docker compose config -q`) green before the push. Merge stays the owner's decision.
 - [ ] T8 — **Owner action, blocked for this agent**: `.env.example` line 30 still says
       `default: deepseek-v4.1-flash`. The repo-local safety guard refuses every `.env*` path to the
       editor tool (the writer refused to route around it and so did the parent), and the owner chose
