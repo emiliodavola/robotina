@@ -52,3 +52,7 @@ sum.golang.org
 # openrouter.ai                 # catalogo de modelos, si tu config apunta ahi
 # portal.nousresearch.com       # portal de Nous (auth / creditos)
 # hermes-agent.nousresearch.com # canal de update / docs de Hermes
+
+# --- Kaggle (competencia gemma-4-developer-agent) ---
+.kaggle.com
+.googleapis.com
