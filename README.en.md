@@ -154,7 +154,7 @@ services**, this is what changed and why:
    ```ini
    ROBOTINA_HERMES_MODEL_PROVIDER=     # default: opencode-go
    ROBOTINA_HERMES_MODEL_BASE_URL=     # default: https://opencode.ai/zen/go/v1
-   ROBOTINA_HERMES_MODEL=              # default: deepseek-v4.1-flash
+   ROBOTINA_HERMES_MODEL=              # default: muse-spark-1.3-contributor (the cheapest model in the catalog; ids change)
    ```
 
    Leave them empty to use the defaults, or set an id from the plan's catalog to

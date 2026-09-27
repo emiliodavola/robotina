@@ -22,7 +22,8 @@
 # Entradas (NO son secretos; los defaults son los de OpenCode Go):
 #   ROBOTINA_HERMES_MODEL_PROVIDER -> model.provider (default opencode-go)
 #   ROBOTINA_HERMES_MODEL_BASE_URL -> model.base_url (default https://opencode.ai/zen/go/v1)
-#   ROBOTINA_HERMES_MODEL          -> model.default  (default deepseek-v4.1-flash)
+#   ROBOTINA_HERMES_MODEL          -> model.default  (default muse-spark-1.3-contributor,
+#                                     el modelo mas barato del catalogo al momento de escribirlo)
 #
 # Nunca es fatal: si todavia no hay config, o el CLI no esta, se avisa fuerte y
 # se devuelve 0. Un arranque NO se rompe por un detalle de configuracion. Este
@@ -36,7 +37,7 @@ CLI=/opt/hermes/bin/hermes
 
 PROVIDER="${ROBOTINA_HERMES_MODEL_PROVIDER:-opencode-go}"
 BASE_URL="${ROBOTINA_HERMES_MODEL_BASE_URL:-https://opencode.ai/zen/go/v1}"
-MODEL="${ROBOTINA_HERMES_MODEL:-deepseek-v4.1-flash}"
+MODEL="${ROBOTINA_HERMES_MODEL:-muse-spark-1.3-contributor}"
 
 # --- 1. Sin config o sin CLI no hay nada que fijar ---------------------------
 # Paso normal en una carpeta de estado nueva: el vendor siembra config.yaml en su
