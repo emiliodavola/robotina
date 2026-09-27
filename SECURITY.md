@@ -143,7 +143,7 @@ ROBOTINA_GITHUB_TOKEN=             # PAT fine-grained; ver «Autenticación de G
 # Modelo de Hermes (no son secretos; ver «Modelo y plan del proveedor»)
 ROBOTINA_HERMES_MODEL_PROVIDER=    # proveedor (default opencode-go)
 ROBOTINA_HERMES_MODEL_BASE_URL=    # endpoint  (default https://opencode.ai/zen/go/v1)
-ROBOTINA_HERMES_MODEL=             # id del modelo (default deepseek-v4.1-flash)
+ROBOTINA_HERMES_MODEL=             # id del modelo (default muse-spark-1.3-contributor, el más barato del catálogo; los ids cambian)
 ```
 
 Las dos claves del proveedor entran al contenedor bajo **nombres distintos**. Hermes recibe la
@@ -204,6 +204,72 @@ quedó fuera de alcance.
 5. Antes de agregar un destino, preguntate si ese servicio necesita ver el tráfico del
    agente. Si la respuesta es "no sé", no lo agregues.
 
+### Excepción registrada: `.googleapis.com`
+
+La entrada `.googleapis.com` **no** es una sola API: por el punto inicial incluye **todas** las
+APIs de Google (`*.googleapis.com`), no el endpoint puntual de un servicio. Se agregó para la
+competencia de Kaggle y se mantiene **a propósito** como riesgo residual aceptado por decisión
+del owner (2026-09-27). No se propone acotarla.
+
+## Rotación de credenciales
+
+Seis credenciales sostienen el stack. Ninguna se imprime nunca: este documento las nombra por
+variable o por ruta, jamás por valor.
+
+### Inventario
+
+| Credencial | Dónde vive | Qué es |
+| --- | --- | --- |
+| `ROBOTINA_TELEGRAM_BOT_TOKEN` | `.env` del repo | token emitido por @BotFather |
+| `ROBOTINA_GITHUB_TOKEN` | `.env` del repo | PAT fine-grained de GitHub |
+| `ROBOTINA_HERMES_MODEL_KEY` | `.env` del repo | clave del proveedor; se publica al proceso Hermes como `OPENCODE_GO_API_KEY` |
+| `ROBOTINA_OPENCODE_MODEL_KEY` | `.env` del repo | clave del proveedor; se publica como `ROBOTINA_OPENCODE_GO_API_KEY` y el `run` de s6 la reexporta como `OPENCODE_GO_API_KEY` **solo** dentro del proceso del server de opencode |
+| `ROBOTINA_OPENCODE_SERVER_PASSWORD` | `.env` del repo | HTTP Basic del server de opencode (loopback) |
+| `${HOST_DATA_DIR}/hermes/.kaggle/access_token` | archivo en el bind | credencial de Kaggle |
+
+### Procedimiento (una por vez)
+
+1. **Editá** el `.env` del host (o reemplazá el archivo, para la credencial de Kaggle).
+2. **Aplicá.** `docker compose up -d` recrea `robotina` si la config cambió; si no recrea,
+   forzálo con `docker compose up -d --force-recreate robotina`. Una rotación **nunca** se
+   infiere con un `docker inspect` desnudo (imprime `.Config.Env` con las claves en claro).
+3. **Verificá**, siempre sin imprimir valores:
+
+   ```bash
+   # El valor que llegó al proceso, por hash (nombre interno del contenedor)
+   docker exec -u hermes robotina printenv OPENCODE_GO_API_KEY | tr -d '\r\n' | sha256sum
+   # El mismo cálculo sobre el valor del .env del host (mismo nombre externo)
+   grep -E '^ROBOTINA_HERMES_MODEL_KEY=' .env | cut -d= -f2- | tr -d '\r\n' | sha256sum
+   # -> los dos hashes tienen que coincidir
+
+   # Salud del contenedor
+   docker compose ps
+
+   # Para Telegram, el estado del gateway
+   docker compose exec robotina sh -c 'jq -r ".platforms.telegram.state" /opt/data/gateway_state.json'
+   #    debe decir `connected`
+   ```
+
+   El nombre externo (`.env`) y el interno (contenedor) **no** son siempre el mismo: la tabla de
+   arriba registra el mapeo de cada clave.
+
+### Orden
+
+De la menos acoplada a la más acoplada, una por vez y con verificación entre cada una:
+
+1. Kaggle (`${HOST_DATA_DIR}/hermes/.kaggle/access_token`).
+2. `ROBOTINA_OPENCODE_SERVER_PASSWORD`.
+3. `ROBOTINA_OPENCODE_MODEL_KEY`.
+4. `ROBOTINA_HERMES_MODEL_KEY`.
+5. `ROBOTINA_GITHUB_TOKEN` (PAT).
+6. `ROBOTINA_TELEGRAM_BOT_TOKEN`.
+
+### Reglas permanentes
+
+- Un valor **nunca** se imprime, ni se pega en un prompt, un issue o un commit.
+- El `.env` del repo está gitignored: la credencial vive ahí, no en el repo.
+- Todo `docker inspect` lleva un `--format` estrecho que **excluye** el bloque de entorno.
+
 ## Verificación del aislamiento
 
 Desde la red del agente, con un contenedor efímero:
@@ -257,10 +323,19 @@ agente; publicarlo en la LAN o en Internet es regalarle el agente a quien alcanc
 
 ## Modelo y plan del proveedor
 
-El modelo default **no** vive en este repo: está en `/opt/data/config.yaml`, dentro del bind
-de Hermes. `HERMES_MODEL` no alcanza para cambiarlo, porque la config del archivo tiene
+El default del modelo de Hermes se declara en `compose.yml` (overrideable desde el `.env` del
+repo) como `ROBOTINA_HERMES_MODEL`, y el cont-init `30-robotina-model` lo aplica a
+`config.yaml` → `model.default` **en cada arranque**. La política de ese default es «el modelo
+**más barato** del catálogo del proveedor», reverificado cuando haga falta y **nunca** asumido:
+los ids del catálogo cambian con el tiempo.
+
+`HERMES_MODEL` no alcanza para cambiarlo, porque la config del archivo tiene
 precedencia sobre la variable (ver `hermes_cli/config.py`: *a truthy configured model wins over
 HERMES_MODEL*).
+
+El default de la **delegación** a OpenCode es una variable distinta y una perilla aparte:
+`ROBOTINA_OPENCODE_DELEGATE_MODEL` (la lee el helper `opencode-delegate`), que **no** sigue la
+política del modelo de Hermes.
 
 `OPENCODE_GO_API_KEY` resuelve al perfil `opencode-go`, cuyo relay sirve **únicamente modelos
 abiertos**. Un id que no esté en ese catálogo devuelve:
@@ -505,6 +580,18 @@ del bind `/opt/data`. No es capricho: es una medición.
 | `opencode.db` (sesiones) | volumen `robotina_opencode_db`, montado en `/opt/data/.local/share/opencode` | Usa **WAL**, y ver más abajo. |
 | `engram.db` (memoria) | volumen `robotina_engram_db`, montado en `/opt/data/.engram` | Usa **WAL**, idem. |
 | Logs del proxy | tmpfs | No persisten a propósito: no dejamos tráfico ni credenciales en disco. |
+
+### Segundo plano de configuración: el `.env` de Hermes
+
+Además del `.env` del **repositorio** (nombres en `.env.example`, gitignored en su forma real, y
+del que `compose.yml` interpola las claves `ROBOTINA_*`), hay un **segundo `.env`** que pertenece
+a Hermes y vive dentro de su bind: `/opt/data/.env` en el contenedor, o sea
+`${HOST_DATA_DIR}/hermes/.env` en el host. Compose no lo interpola: sus claves no aparecen en
+`docker compose config` ni pasan por la validación estática. Lo lee el propio Hermes desde su
+HOME, así que ahí
+viven su `API_SERVER_KEY` y las familias `BROWSERBASE_*`, `TERMINAL_*` y `TELEGRAM_HOME_CHANNEL`.
+Son claves del agente, no del stack: se rotan editando ese archivo dentro del bind, no el `.env`
+del repo. Nunca se imprimen ni se pegan en un issue.
 
 ### Montaje anidado (volumen dentro de bind)
 
