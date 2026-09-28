@@ -1,0 +1,39 @@
+#!/command/with-contenv sh
+# =============================================================================
+# Limpia la basura que las herramientas dejan en /var/tmp.
+#
+# Por que existe: /var/tmp es la capa del contenedor, elegida a proposito como
+# TMPDIR para no comerse el tmpfs de 256 MB de /tmp (ver el comentario de
+# compose.yml). Ahi se acumulan dos cosas que nadie limpia, medido el
+# 2026-09-28:
+#
+#   - OpenTUI deja una .so de 5,5 MB POR INVOCACION (69 archivos, ~380 MB en
+#     tres dias). El compose.yml ya documentaba que extrae una .so y la carga
+#     con dlopen; lo que faltaba saber es que no la borra nunca.
+#   - El scratch por invocacion bajo /var/tmp/opencode/, incluidos los
+#     interpretes que un proceso hijo de opencode instala ahi (1,4 GB). Es cache
+#     de runtime: muere con el contenedor igual, pero mientras tanto se acumula.
+#
+# Sin esto, el contenedor que queda vivo mas tiempo junta mas basura, y nada la
+# mira hasta que el disco se llena.
+#
+# Alcance deliberadamente acotado: SOLO los dos patrones de arriba, con ruta
+# absoluta. No toca nada mas de /var/tmp, ni archivos de otros uid fuera de esos
+# patrones, ni el interprete de la imagen (que vive en /opt/uv/python, volumen
+# propio).
+# =============================================================================
+set -eu
+
+before="$(find /var/tmp -maxdepth 1 -name '.bcd9*.so' -type f 2>/dev/null | wc -l)"
+if [ "$before" -gt 0 ]; then
+  find /var/tmp -maxdepth 1 -name '.bcd9*.so' -type f -delete 2>/dev/null || true
+fi
+
+scratch=0
+if [ -d /var/tmp/opencode ]; then
+  scratch="$(find /var/tmp/opencode -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
+  rm -rf /var/tmp/opencode/* 2>/dev/null || true
+fi
+
+echo "robotina: /var/tmp limpio (.so de OpenTUI: $before, entradas de scratch: $scratch)" >&2
+exit 0
