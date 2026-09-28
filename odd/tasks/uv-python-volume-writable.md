@@ -60,7 +60,8 @@ Branch: `fix/issue-70-uv-python-volume-writable`, off `main`. Owner: `emiliodavo
 - [x] T6 — Static verification: `docker compose config -q`, `sh -n` and the container's own
       `dash -n` on the cont-init; independent read-only verifier over the diff and the spec
       assertions.
-- [ ] T7 — Commit per work unit, push, PR against `main` assigned to the owner.
+- [x] T7 — Commit per work unit, push, PR against `main` assigned to the owner: **PR #71**
+      (3 commits: tracker, fix, specs/security docs).
 
 ## Route declaration
 
