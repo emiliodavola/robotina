@@ -76,20 +76,53 @@ prerequisites of #42 and #43.
 ## Residual risk (declare it, do not paper over it)
 
 The window moves `engram` from the running **2.1.0** to the pinned **2.2.1** over the *same* WAL
-`engram.db`. The release publishes a `.migrate.lock`-style migration path, but that migration has not
-been measured here. The window procedure MUST therefore begin with `scripts/export-state.sh`, which
-the repository already provides for exactly this ("el cerebro de engram" to portable JSON), so the
-memory can be restored if the migration goes wrong.
+`engram.db`. **Measured 2026-09-28: the readable content of that store is empty.** `engram stats`
+reports `Sessions: 0`, `Observations: 0`, and `engram export` writes 135 bytes of empty arrays, while
+the volume holds 6.4 MB of `engram.db` + `engram.db-wal` and four `engram mcp` processes (plus the
+supervised `engram serve`) are alive with `ENGRAM_DATA_DIR=/opt/data/.engram` pointing at it.
+
+Two consequences, and they pull in opposite directions:
+
+- The version migration has (almost) nothing to migrate, so it is **less** risky than this tracker
+  first assumed.
+- But a memory backend that reports zero observations is not a memory, and the JSON export protects
+  nothing. That discrepancy is a defect of its own, recorded here and to be filed separately — it
+  does **not** block the window (the window is about *which* binary runs), but it must never be read
+  as "the memory is fine because the export ran".
+
+Secondary finding from the same measurement: four `engram mcp --tools=agent` processes are alive at
+once (one per OpenCode session that used the MCP, and none of them reaped), each holding the same
+store. That is process accumulation against `pids_limit: 1024`, same family as the OpenTUI leftovers
+of #43.
 
 ## Window procedure (in this order, one sitting)
 
-1. **Back up the brain while 2.1.0 still runs it.**
-   `docker compose exec robotina sh /opt/export-state.sh` — portable JSON in `${HOST_DATA_DIR}/backups`.
+**Every step that hands a bare absolute path to `docker exec` needs `MSYS_NO_PATHCONV=1`.** On Git
+Bash, `/opt/export-state.sh` becomes `C:/Program Files/Git/opt/export-state.sh` and the step dies with
+`cannot open …`. Paths that live **inside** a quoted `sh -c '…'` string are safe: Git Bash does not
+rewrite the contents of an argument that does not start with a slash. This was measured the hard way
+while checking this very procedure.
+
+1. **Back up the brain's raw bytes while 2.1.0 still owns them.** The CLI export is **not** a backup
+   of the brain: measured on 2026-09-28, `engram stats` reports `Sessions: 0` / `Observations: 0` and
+   `engram export` writes **135 bytes** of empty arrays, while the volume holds 6.4 MB of
+   `engram.db` + `engram.db-wal`. Snapshot the volume read-only instead:
+
+   ```bash
+   MSYS_NO_PATHCONV=1 docker run --rm --entrypoint tar \
+     -v robotina_engram_db:/data:ro \
+     -v "${HOST_DATA_DIR}/backups":/backup \
+     robotina:local czf "/backup/engram-volume-$(date +%Y%m%d-%H%M%S).tgz" -C /data .
+   ```
+
+   Verified on 2026-09-28: the archive is ~2 MB compressed and carries `engram.db`,
+   `engram.db-wal` and `engram.db-shm`. `scripts/export-state.sh` still runs and is what produces
+   the portable session export, but the brain's safety net is the volume snapshot.
 2. **Build, do not touch the running container.** `docker compose build`. The interpreter volume does
    not exist yet; Docker creates it on the next `up`.
 3. **Quarantine the shadow** — `mv`, never `rm`, because it is the agent's state and the new
    healthcheck must be able to see it leave:
-   `docker compose exec robotina mv /opt/data/.local/bin/engram /opt/data/.local/bin/engram.unused-2.1.0`
+   `MSYS_NO_PATHCONV=1 docker compose exec robotina mv /opt/data/.local/bin/engram /opt/data/.local/bin/engram.unused-2.1.0`
 4. **Recreate.** `docker compose up -d`. This is where #55's helper fix, the 2.2.1 pin, the
    interpreter volume and the boot cleanup all land at once.
 5. **Verify**: `docker compose ps` (both healthy), the engram version pair and the `PATH` resolution
