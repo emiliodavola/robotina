@@ -35,42 +35,77 @@ Evidence already recorded in #40, plus one new API fact found while scoping this
    query parameters, and `POST /api/session/{sessionID}/wait` ("Wait for session") as a
    session-scoped endpoint. Neither was ever tested; #40 listed them as unverified options.
 
-## Open questions (being measured, not assumed)
+## Answers (measured live, 2026-09-28)
 
-- **Q1** Does `GET /session/status?directory=<the session's own directory>` report the session as
-  `busy` while the global call reports it absent? If yes, the fix is a scope correction and the
-  polling architecture survives unchanged.
-- **Q2** What does `POST /api/session/{id}/wait` actually do: does it block until the turn ends,
-  and is it bounded? If it is a clean session-scoped wait, it is a better liveness primitive than
-  any status map.
+**Q1 — yes.** `GET /session/status?directory=%2Ftmp` answered `{"type":"busy"}` while the
+unscoped `GET /session/status` answered `{}` at **every one of 32 polls**, including while the
+session's `bash` tool part was `running`; the scoped answer flipped to `{}` exactly at
+`finish=stop`. `?workspace=/tmp` returned HTTP `500` `UnknownError` on every call.
 
-Both are being measured against the live stack before any code is written. The helper can resolve
-the session's directory from the API itself (`GET /session/{id}` → `.directory`), so a fix does not
-depend on the caller having passed `--directory`.
+**Q2 — no.** `POST /api/session/{id}/wait` is a stub: HTTP `503`
+`{"_tag":"ServiceUnavailableError","message":"Session wait is not available yet"}` in 10–80 ms both
+while idle and while the turn was `busy`. It never blocks. Discarded.
 
-## Shape (pending the measurement)
+Also measured: an aborted assistant message has **no `finish` field at all** plus
+`info.error.name == "MessageAbortedError"`, while an in-progress message carries `finish: null`.
+`finish` is a bare `string` in the OpenAPI schema (no enum), observed domain
+`{tool-calls, stop, null, absent}`.
 
-1. Liveness must be answered by the instance that owns the session, or by the session itself.
-2. "Not in the map" must become **unknown**, never closure. Only a positive answer about the turn
-   may end it.
-3. A closure verdict needs terminal evidence from the session's own messages; the global timeout
-   stays as the outer bound.
-4. Exit codes must let the caller tell three different facts apart: a clean close, a turn error or
-   close without a final message, and an external abort (today the last two are both `3`).
-5. The spec must carry the regression: OD6's proof has to exercise `--directory` ≠ the server cwd,
-   which is the case that would have caught this.
+## Shape (decided by the measurement)
+
+1. Liveness is answered by the instance that owns the session:
+   `GET /session/status?directory=<session.directory>`, with the directory read back from the server
+   (`GET /session/{id}` → `.directory`), so a reused `--session` is scoped too.
+2. If the scope cannot be resolved, the status degrades to **unknown**, never to closed: that turn is
+   bounded by the global timeout (slow but safe).
+3. Closure verdicts still come from the session's own messages; the settle window keeps guarding the
+   race between the status flip and the message write, and is now only reachable with a *scoped*
+   answer.
+4. The exit code separates the facts (#51): `3` = ended without a successful final message,
+   `5` = aborted by something that is not the helper. Aborts the helper performs itself keep `2` and
+   `4`.
+5. The spec carries the regression: OD6 now names the instance scope, and its proof exercises
+   `--directory` outside `/workspace` — the case that would have caught this.
+
+## Evidence (before/after on the live server, same task, same directory)
+
+| Run | Invocation | Exit | stdout |
+| --- | --- | --- | --- |
+| image copy (pre-fix) | `/opt/robotina/bin/opencode-delegate --directory /tmp --timeout 120 "…sleep 20… DONE"` | **3** | empty; stderr `el turno cerro sin mensaje final (finish=null)` |
+| working tree | `sh -s -- --directory /tmp --timeout 120 "…sleep 20… DONE"` | **0** | `DONE`; stderr `scope: liveness acotada a /tmp` |
+| working tree, no `--directory` | `sh -s -- --timeout 90 "Reply with exactly OK"` | **0** | `OK`; stderr `scope: liveness acotada a /workspace` |
+| working tree + external abort | background run, then `POST /session/{SID}/abort` | **5** | stderr names `MessageAbortedError` as not-helper |
+| working tree, tiny timeout | `sh -s -- --directory /tmp --timeout 3 "…sleep 40…"` | **4** | stderr `timeout global de 3s … (ultimo status: busy, alcance: /tmp)` |
+
+The runs used the spec's own stale-image recipe (`sh -s -- <args> < robotina/bin/opencode-delegate`),
+because the helper is baked into the image and this branch does not rebuild it. md5 evidence of what
+ran:
+
+```
+working tree : 3c4500d29f1336419baf84da730bbf65
+HEAD         : 8a0caae03b231f5a015d5d3448d4af82
+imagen       : 8a0caae03b231f5a015d5d3448d4af82   (= HEAD, o sea el helper con el bug)
+```
+
+Authorized state change for the measurement: one temp copy of the helper in the container's tmpfs
+(removed afterwards) and five throwaway sessions under `/tmp`. `/workspace` was never touched, and no
+container was restarted, rebuilt or recreated.
 
 ## Tasks
 
-- [ ] T1 — Branch and this tracker.
-- [ ] T2 — Measure Q1/Q2 against the live stack (delegated, read-only + one throwaway session).
-- [ ] T3 — Implement the scoped liveness and the exit-code separation in
-      `robotina/bin/opencode-delegate`.
-- [ ] T4 — Amend `openspec/specs/opencode-delegation/spec.md`: OD6's liveness scope, a new
-      requirement for the exit-code contract, and the `--directory` regression scenario.
-- [ ] T5 — Document the resulting exit-code table in the `opencode-delegation` skill and in
-      `hermes/context/.hermes.md`.
-- [ ] T6 — Run the OD6/OD7 proofs plus the new `--directory` proof against the live stack.
+- [x] T1 — Branch and this tracker.
+- [x] T2 — Measured Q1/Q2 against the live stack (delegated to a read-only verifier, plus one
+      throwaway session per question).
+- [x] T3 — Implemented the scoped liveness and the exit-code separation in
+      `robotina/bin/opencode-delegate`. Syntax checked with the container's own `dash -n`.
+- [x] T4 — Amended `openspec/specs/opencode-delegation/spec.md`: OD6 now names the instance scope,
+      OD9 feeds it from the server's canonical directory, and a new **OD10** fixes the exit-code
+      contract. Added the `--directory` regression scenario and the two measured dead ends.
+- [x] T5 — Documented the scope and the exit-code table in the `opencode-delegation` skill and in
+      `hermes/context/.hermes.md`, including a troubleshooting row for the stale-image trap.
+- [x] T6 — Ran the proofs on the live stack through the spec's stale-image recipe: exit `3` → `0` on
+      the same task, no regression without `--directory`, `5` for an external abort, `4` for the
+      helper's own timeout.
 - [ ] T7 — Commits per work unit, push, PR against `main` assigned to the owner.
 
 ## Route declaration
