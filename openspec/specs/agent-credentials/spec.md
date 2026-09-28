@@ -347,3 +347,72 @@ so `info.finish` stays `null` and the turn never completes.
   (must print the corrected line; empty output or a non-zero exit is a FAILURE. The log goes to the
   throwaway directory, never to `/tmp`: a `/tmp` path left by an earlier root-run probe is root-owned
   and the next `hermes`-user run then fails on the redirect instead of on the delegation)
+
+### Requirement: CR10 — The keys the runtime reads through the profile scope live in the profile's `.env`
+
+Keys that the gateway reads through the **profile secret scope** — rather than from the container
+environment — SHALL be present in the default profile's `.env` (`/opt/data/.env`), and a boot step
+SHALL keep them in sync with the container environment, because those values are what the stack
+declares. The mirrored set SHALL be explicit, and a key is added to it only together with the read
+site that needs it. Keys the adapter reads straight from `os.environ` SHALL NOT be mirrored: the
+point is to satisfy the fail-closed scoped read, not to duplicate the whole environment.
+
+Measured origin (2026-09-28). Under `gateway.multiplex_profiles: true` — the vendor's persisted
+default, whose explicit `false` is retired as an opt-out — `platform_gate_env()` and `get_secret()`
+return the default on a scope miss instead of falling through to `os.environ`, to avoid leaking
+another profile's value (#72348). The scope is built by `build_profile_secret_scope()` from each
+profile's `.env`. With that file carrying neither key, one recreate produced two silent failures:
+
+- the Telegram allowlist went empty → `Blocked unauthorized user` for the owner's own id, while the
+gateway process demonstrably had the variable in its environment;
+- the model credential went missing → `Model resolution failed … No usable credentials found for
+provider 'opencode-go'. Set OPENCODE_GO_API_KEY.`
+
+`hermes doctor` catches neither, because it inspects the process environment: it reported the
+OpenCode Go key as configured while the runtime could not find it.
+
+#### Scenario: Every mirrored key is present in the profile's `.env`
+
+- GIVEN the container is up
+- WHEN the profile's env file is inspected for each key of the mirrored set
+- THEN each key appears exactly once
+- PROOF:
+  `docker compose exec -T robotina sh -c 'for k in OPENCODE_GO_API_KEY TELEGRAM_ALLOWED_USERS; do printf "%s: " "$k"; grep -c "^$k=" /opt/data/.env; done'`
+  (each count must be exactly `1`; `0` is a FAILURE)
+
+#### Scenario: The profile's value equals the container's, compared without printing it
+
+- GIVEN the same keys
+- WHEN the two values are compared
+- THEN they are identical
+- PROOF:
+  `docker compose exec -T robotina sh -c 'a=$(printf "%s" "$OPENCODE_GO_API_KEY" | tr -d "\r\n" | sha256sum); b=$(grep -m1 "^OPENCODE_GO_API_KEY=" /opt/data/.env | cut -d= -f2- | tr -d "\r\n" | sha256sum); [ "$a" = "$b" ] && echo MATCH || echo MISMATCH'`
+  (must print `MATCH`; a `docker inspect`-based comparison is forbidden because it prints the value)
+
+#### Scenario: The boot step is idempotent, non-fatal, and scoped by home
+
+- GIVEN the keys are already mirrored
+- WHEN the boot step runs again
+- THEN it reports no change, does not rewrite the file, and exits `0`
+- GIVEN a key that is absent from the environment
+- WHEN the step runs
+- THEN it warns and still exits `0`
+- PROOF:
+  `docker compose exec -T robotina sh -s < robotina/s6/cont-init.d/50-robotina-profile-env` twice
+  (both exits `0`; the second prints `ya esta espejada` for each mirrored key) and
+  `docker compose exec -T -e ROBOTINA_PROFILE_ENV_KEYS=NO_EXISTE_ESTA_KEY robotina sh -s < robotina/s6/cont-init.d/50-robotina-profile-env`
+  (must exit `0`)
+- NOTE: `ROBOTINA_PROFILE_ENV_HOME` redirects both the comparison and the write, so the write path
+  can be exercised against a throwaway home (`ROBOTINA_PROFILE_ENV_HOME=/tmp/probehome`) instead of
+  the agent's file. Measured: it writes the key there and is idempotent on the second run.
+
+#### Scenario: A key read from `os.environ` is not part of the mirrored set
+
+- GIVEN `TELEGRAM_BOT_TOKEN` is read straight from the process environment and works without the
+  mirror
+- WHEN the mirrored set is read
+- THEN the token is not in it
+- PROOF:
+  `grep -E '^KEYS=' robotina/s6/cont-init.d/50-robotina-profile-env | grep -c 'TELEGRAM_BOT_TOKEN'`
+  (must be `0`; the header prose mentions the token deliberately, so the assertion names the set,
+  not the file)
