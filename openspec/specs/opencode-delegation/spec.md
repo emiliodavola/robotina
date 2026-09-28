@@ -22,6 +22,10 @@ server's own cwd when the parameter is omitted), so a session created with `--di
 is absent from the unscoped answer *while it runs*, and reading that absence as a closure lost
 healthy turns.
 
+Issue #69 added the fourth: **the turn's time budget must fit a multi-phase task by default, and it
+must be configurable.** Three delegated turns that combined a survey, an edit, a network step
+(`uv sync`) and a git/GitHub push were aborted by the previous 900 s default.
+
 Artifact language: English.
 
 ## Verification model
@@ -441,3 +445,38 @@ observed domain of `{tool-calls, stop, null, absent}`.
 
 - PROOF: the OD6 30 s proof (exit `0`, prints `DONE`) and the OD6 `--directory` proof (exit `0`,
   prints `DONE`)
+
+### Requirement: OD11 — The turn's time budget fits a multi-phase task by default and is configurable
+
+`opencode-delegate` SHALL default its global turn budget to **1800 seconds** — measured (#69): three
+multi-phase turns (survey + edit + network + git/GitHub) exceeded the previous 900 s default — SHALL
+read that default from `ROBOTINA_OPENCODE_DELEGATE_TIMEOUT` when the variable is set, and SHALL let
+`--timeout SEC` override both. It SHALL document `--timeout SEC` and `--interval SEC` in `--help`.
+The budget is a ceiling, not a target: the requirement fixes the number and the knob, and the
+splitting guidance lives in the skill.
+
+#### Scenario: The default is 1800 s and comes from the environment
+
+- PROOF: `grep -c 'ROBOTINA_OPENCODE_DELEGATE_TIMEOUT' robotina/bin/opencode-delegate` (must be ≥ 1)
+  together with `grep -c ':-1800' robotina/bin/opencode-delegate` (must be ≥ 1) and
+  `grep -c '^TIMEOUT=900' robotina/bin/opencode-delegate` (must be 0 — the old constant form is
+  gone, so this cannot pass with the defect present)
+
+#### Scenario: The two time flags are documented
+
+- PROOF: `sh robotina/bin/opencode-delegate --help 2>&1 | grep -c 'presupuesto global del turno'`
+  (must be ≥ 1) together with the same for the `--interval` entry (must be ≥ 1)
+- NOTE: the `uso:` line already listed `<--timeout SEC>` before this change, so a plain grep for the
+  flag name would be vacuous; the assertion names the **description** the requirement asks for.
+
+#### Scenario: The environment value bounds the turn
+
+- GIVEN the stack is up
+- WHEN a delegation whose turn keeps running is issued with the environment value and no `--timeout`
+- THEN the helper exits `4` and names that budget
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -c 'ROBOTINA_OPENCODE_DELEGATE_TIMEOUT=3 sh -s -- "Run the shell command sleep 40 and then reply with exactly DONE"' < robotina/bin/opencode-delegate`
+  (must exit `4`; stderr must carry `timeout global de 3s`; a non-zero-but-not-4 exit, or a
+  completion, is a FAILURE)
+- NOTE: the helper is baked into the image, so this uses the stale-image recipe of the verification
+  model; after a rebuild and `--force-recreate` the same proof runs against
+  `/opt/robotina/bin/opencode-delegate`.

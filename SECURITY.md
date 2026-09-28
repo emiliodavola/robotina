@@ -335,7 +335,8 @@ HERMES_MODEL*).
 
 El default de la **delegación** a OpenCode es una variable distinta y una perilla aparte:
 `ROBOTINA_OPENCODE_DELEGATE_MODEL` (la lee el helper `opencode-delegate`), que **no** sigue la
-política del modelo de Hermes.
+política del modelo de Hermes. El presupuesto global del turno de una delegación es otra perilla del
+mismo helper: `ROBOTINA_OPENCODE_DELEGATE_TIMEOUT` (segundos; default 1800, y `--timeout` lo pisa).
 
 `OPENCODE_GO_API_KEY` resuelve al perfil `opencode-go`, cuyo relay sirve **únicamente modelos
 abiertos**. Un id que no esté en ese catálogo devuelve:
