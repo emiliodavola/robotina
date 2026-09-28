@@ -25,11 +25,28 @@
 # Nota: el build corre en el host, FUERA del proxy de egreso. Es lo mismo que
 # cualquier build de imagen; el trafico medido por Squid no incluye esto.
 # =============================================================================
-# La base va con tag Y digest. El tag documenta el canal de upstream; el digest
-# es lo que hace el build reproducible, porque `latest` se mueve solo y un build
-# que la sigue deja de poder contestar "que codigo corre". Mover el digest es un
-# commit revisable (Dependabot lo propone), no un efecto secundario de buildear.
-FROM nousresearch/hermes-agent:latest@sha256:d4da4a40cd7a28aba983775d9fd31d94cbf153eeb0cb9e844d6d0f612b7c24db
+# La base va con TAG CON FECHA mas digest, nunca con `latest` pelado.
+#
+#   - El digest es lo que hace reproducible el build: un tag se mueve solo, y un
+#     build que lo sigue deja de poder contestar "que codigo corre".
+#   - El tag con fecha es lo que hace REVISABLE el bump. Upstream publica
+#     `v2026.9.24`, `v2026.9.21`, `v2026.9.14`, ... con cadencia semanal:
+#     `latest` -> `latest` no dice que version entro, `v2026.9.24` -> `v2026.9.27`
+#     si. Y deja explicita la version de Hermes, que es la defensa contra un
+#     cambio de comportamiento del vendor entrando con un rebuild — que es
+#     exactamente lo que paso con el modo multiplex.
+#
+# Para mover el pin a mano (no esta verificado que Dependabot sepa comparar tags
+# con formato de fecha; si no los propone, este es el camino):
+#
+#   curl -sS 'https://hub.docker.com/v2/repositories/nousresearch/hermes-agent/tags?page_size=30&ordering=last_updated' \
+#     | jq -r '.results[] | select(.name|test("^v[0-9]{4}\\.[0-9]+\\.[0-9]+$")) | "\(.name)\t\(.last_updated)\t\(.digest)"' | head -5
+#
+# Verificado antes de escribirlo: el tag+digest resuelve a un indice OCI con
+# linux/amd64. El build corre ademas las aserciones de asset (glibc/musl),
+# checksums e inventario, asi que una base incompatible falla al construir y no
+# al arrancar.
+FROM nousresearch/hermes-agent:v2026.9.24@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7
 
 # --- versiones fijadas --------------------------------------------------------
 # Las tres primeras vienen de la imagen de opencode anterior (paridad). Las tres

@@ -35,7 +35,14 @@
 version: 2
 
 updates:
-  # La imagen base del agente: `FROM` en robotina/Dockerfile.
+  # La imagen base del agente: `FROM` en robotina/Dockerfile, hoy con tag con
+  # fecha (`v2026.9.24`) mas digest.
+  #
+  # NO ESTA VERIFICADO que Dependabot sepa comparar tags con formato de fecha
+  # (no son semver): puede limitarse a actualizar el digest del tag que ya esta
+  # escrito en vez de proponer el salto al tag siguiente. Si eso pasa, el pin se
+  # mueve a mano con la receta que esta comentada en el Dockerfile. Se sabra con
+  # el proximo release con fecha, que upstream publica cada ~7 dias.
   - package-ecosystem: docker
     directory: /robotina
     schedule:
