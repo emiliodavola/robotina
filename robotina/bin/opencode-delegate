@@ -11,10 +11,12 @@
 #
 #   A1) El turno puede quedarse en `running` para siempre. El caso medido es
 #       `external_directory: ask` sin un humano que conteste: la tool call no
-#       termina y la sesion ni avanza ni falla. El server SI expone el estado
-#       real del turno, y es de ahi de donde lo leemos: `GET /session/status`
+#       termina y la sesion ni avanza ni falla. El server expone el estado real
+#       del turno, y es de ahi de donde lo leemos: `GET /session/status`
 #       devuelve `busy` mientras el turno vive y saca la sesion del mapa cuando
-#       termina (ausencia = "no esta ocupada", no es un error). Mientras el
+#       termina (ausencia = "no esta ocupada", no es un error). OJO: ese mapa es
+#       el de la INSTANCIA del cwd que se consulte, no uno global; ver el bloque
+#       de alcance mas abajo, que es el bug de #40. Mientras el
 #       turno vive miramos `GET /api/session/{id}/permission`: una permission
 #       pendiente es una espera que ningun humano puede contestar, asi que
 #       abortamos y salimos 2 nombrando el bloqueo.
@@ -54,7 +56,16 @@
 #
 # Salidas: 0 turno terminado (`info.finish == "stop"`), 2 bloqueo nombrado
 # (permission pendiente; el turno se aborta), 3 error del turno o cierre
-# distinto de `stop`, 4 timeout global, 1 error de uso o de transporte.
+# distinto de `stop` (incluye "cerro sin mensaje final"), 4 timeout global,
+# 5 el turno fue abortado por alguien que no es este helper
+# (`MessageAbortedError`), 1 error de uso o de transporte.
+#
+# Alcance de la liveness (#40): `GET /session/status` responde por la INSTANCIA
+# del cwd que se le pida. Sin el parametro `directory` responde por la instancia
+# del cwd del server (`/workspace`), asi que una sesion creada con --directory en
+# otro lado no aparece en esa vista; leer esa ausencia como cierre del turno era
+# el bug. El alcance se resuelve con el valor canonico del server
+# (`GET /session/{id}` -> .directory).
 #
 # stdout SOLO lleva el texto de la respuesta; todo diagnostico va a stderr, de
 # modo que el helper se pueda usar en una tuberia sin contaminarla.
@@ -104,7 +115,8 @@ uso: opencode-delegate [--session SID] [--agent NAME] [--directory PATH]
                      o `build`). Se manda explicito en prompt_async.
   --directory PATH   cwd de la sesion nueva (default: el del server, /workspace)
   --stall-polls N    DEPRECADO: ya no afecta el comportamiento; el estado del
-                     server (GET /session/status) es la autoridad de liveness.
+                     server ACOTADO A LA SESION (GET /session/status?directory=)
+                     es la autoridad de liveness.
 EOF
 }
 
@@ -181,7 +193,7 @@ fi
 if [ "$stall_polls_set" = 1 ]; then
   case "$STALL_POLLS" in '' | *[!0-9]*) echo "opencode-delegate: --stall-polls invalido: $STALL_POLLS" >&2; exit 1 ;; esac
   [ "$STALL_POLLS" -ge 1 ] || { echo "opencode-delegate: --stall-polls invalido: $STALL_POLLS (se espera un entero positivo)" >&2; exit 1; }
-  echo "opencode-delegate: --stall-polls esta deprecado y ya no afecta el comportamiento; el estado del server (GET /session/status) es la autoridad de liveness" >&2
+  echo "opencode-delegate: --stall-polls esta deprecado y ya no afecta el comportamiento; el estado del server acotado a la sesion (GET /session/status?directory=) es la autoridad de liveness" >&2
 fi
 case "$TIMEOUT" in '' | *[!0-9]*) echo "opencode-delegate: --timeout invalido: $TIMEOUT" >&2; exit 1 ;; esac
 case "$INTERVAL" in '' | *[!0-9.]*) echo "opencode-delegate: --interval invalido: $INTERVAL" >&2; exit 1 ;; esac
@@ -215,6 +227,40 @@ if [ -z "$SESSION" ]; then
   fi
   # Va a stderr: stdout queda limpio para el texto de la respuesta.
   echo "session: $SESSION" >&2
+fi
+
+# --- alcance de la liveness (#40) -------------------------------------------
+# `GET /session/status` NO es un mapa global: responde por la instancia del cwd
+# que se le pida con `directory`, y sin el parametro responde por la instancia
+# del cwd del server (/workspace). Medido en #40: una sesion en /tmp con un
+# `bash` en `running` era ABSENT en la vista global y `{"type":"busy"}` con
+# `?directory=/tmp`. Leer esa ausencia como "el turno cerro" es el bug que este
+# bloque arregla.
+#
+# El alcance se resuelve con el valor CANONICO del server (`GET /session/{id}`
+# -> .directory), no con el argumento del caller: asi vale igual para una sesion
+# creada por este helper y para una reusada con --session, y no depende de como
+# el caller escribio la ruta.
+#
+# Si el alcance no se puede resolver, la liveness queda en `unknown`: una sesion
+# sin alcance conocido NUNCA se declara cerrada por un mapa que puede no ser el
+# suyo. El precio es que ese turno se acota por el timeout global; es lento pero
+# correcto, y es el lado seguro del error.
+#
+# Descartados POR MEDIDOS, para no volver a proponerlos:
+#   - `?workspace=PATH` devuelve HTTP 500 (UnknownError) siempre.
+#   - `POST /api/session/{id}/wait` es un stub: 503 "Session wait is not
+#     available yet", nunca bloquea, ni con el turno vivo.
+SESSION_DIR=""
+if session_meta="$(api -f "$BASE/session/$SESSION" 2>/dev/null)"; then
+  if printf '%s' "$session_meta" | jq -e . >/dev/null 2>&1; then
+    SESSION_DIR="$(printf '%s' "$session_meta" | jq -r '.directory // empty' 2>/dev/null || true)"
+  fi
+fi
+if [ -n "$SESSION_DIR" ]; then
+  echo "scope: liveness acotada a $SESSION_DIR" >&2
+else
+  echo "opencode-delegate: aviso: no se pudo resolver la directory de la session; la liveness queda por mensajes y el cierre lo acota el timeout global" >&2
 fi
 
 # --- dedupe (A3) ------------------------------------------------------------
@@ -257,23 +303,28 @@ start_epoch="$(date +%s)"
 settle_count=0
 
 while :; do
-  # Estado del turno segun el server, que es la unica autoridad de liveness.
-  # Tres casos distintos, y la distincion importa:
+  # Estado del turno segun el server, ACOTADO A LA INSTANCIA QUE ES DUENA DE LA
+  # SESION (#40). Tres casos distintos, y la distincion importa:
   #   - `busy`/`retry`       -> el turno vive.
-  #   - `idle`/`absent`      -> el server dice que el turno cerro. `absent` es
-  #     el estado normal de fin: la sesion sale del mapa de `GET /session/status`
-  #     cuando termina. NO es lo mismo que un status ilegible.
-  #   - `unknown`            -> no se pudo leer el status (request o cuerpo).
+  #   - `idle`/`absent`      -> el server dice que el turno cerro. `absent` es el
+  #     estado normal de fin DE ESA INSTANCIA: la sesion sale del mapa cuando
+  #     termina. Vale porque la consulta va acotada; sobre el mapa global, la
+  #     misma ausencia no dice nada y era el bug de #40.
+  #   - `unknown`            -> no se pudo leer el status (request o cuerpo), o
+  #     no hay alcance resuelto. NO es un cierre.
   # Si el request o el cuerpo fallan, degradamos a `unknown` y seguimos: un
   # status ilegible no puede matar un turno sano (lo acota el timeout global).
   status_type="unknown"
-  if status_json="$(api -f "$BASE/session/status" 2>/dev/null)"; then
-    if printf '%s' "$status_json" | jq -e . >/dev/null 2>&1; then
-      # Envolver la asignacion en un `if` es a proposito: un `x="$(...)"` pelado
-      # que falla muere por `set -e`. `has` distingue "la sesion no esta en el
-      # mapa" (absent) de "no se pudo leer" (unknown).
-      if st="$(printf '%s' "$status_json" | jq -r --arg s "$SESSION" 'if has($s) then (.[$s].type // "unknown") else "absent" end' 2>/dev/null)"; then
-        status_type="${st:-unknown}"
+  if [ -n "$SESSION_DIR" ]; then
+    status_url="$BASE/session/status?directory=$(printf '%s' "$SESSION_DIR" | jq -sRr @uri)"
+    if status_json="$(api -f "$status_url" 2>/dev/null)"; then
+      if printf '%s' "$status_json" | jq -e . >/dev/null 2>&1; then
+        # Envolver la asignacion en un `if` es a proposito: un `x="$(...)"` pelado
+        # que falla muere por `set -e`. `has` distingue "la sesion no esta en el
+        # mapa" (absent) de "no se pudo leer" (unknown).
+        if st="$(printf '%s' "$status_json" | jq -r --arg s "$SESSION" 'if has($s) then (.[$s].type // "unknown") else "absent" end' 2>/dev/null)"; then
+          status_type="${st:-unknown}"
+        fi
       fi
     fi
   fi
@@ -336,8 +387,17 @@ while :; do
     finish="$(printf '%s' "$assistant" | jq -r '.info.finish // empty')"
     turn_error="$(printf '%s' "$assistant" | jq -c '.info.error // empty')"
 
-    # Error explicito del turno.
+    # Error explicito del turno. Un abort EXTERNO se reporta como abort y no
+    # como error generico: el caller tiene que poder distinguir "el turno cerro
+    # sin mensaje final" (3) de "alguien aborto la sesion" (5). Medido: el
+    # mensaje abortado NO trae `finish` en absoluto y su
+    # info.error.name es MessageAbortedError.
     if [ -n "$turn_error" ]; then
+      turn_error_name="$(printf '%s' "$assistant" | jq -r '.info.error.name // empty' 2>/dev/null || true)"
+      if [ "$turn_error_name" = "MessageAbortedError" ]; then
+        echo "opencode-delegate: el turno fue abortado (MessageAbortedError) en la session $SESSION; el abort no lo hizo este helper" >&2
+        exit 5
+      fi
       echo "opencode-delegate: error del turno en la session $SESSION: $turn_error" >&2
       exit 3
     fi
@@ -356,9 +416,11 @@ while :; do
       # asentamiento. El flip del status puede ganarle la carrera a la escritura
       # del mensaje final, asi que esperamos unos polls antes de declarar el
       # cierre. SOLO aplica cuando el server dijo que el turno cerro
-      # (`idle`/`absent`): un status ilegible (`unknown`) NO es un cierre, porque
-      # un step en curso mantiene `finish=null` mientras corre su tool (medido:
-      # 28 s), y leerlo como cierre daria un exit 3 falso a los 3 polls.
+      # (`idle`/`absent` DE LA INSTANCIA DE LA SESION): un status ilegible
+      # (`unknown`) NO es un cierre, porque un step en curso mantiene
+      # `finish=null` mientras corre su tool (medido: 28 s), y leerlo como cierre
+      # daria un exit 3 falso a los 3 polls. Ese fue el bug de #40 y por eso el
+      # alcance de la consulta es lo que hace segura esta ventana.
       if [ "$status_over" = 1 ]; then
         settle_count=$((settle_count + 1))
         if [ "$settle_count" -ge "$SETTLE_POLLS" ]; then
@@ -380,7 +442,7 @@ while :; do
   # Timeout global: se agoto el presupuesto sin que el turno cierre. Se informa
   # el ultimo status observado antes de abortar, como diagnostico extra.
   if [ "$(($(date +%s) - start_epoch))" -ge "$TIMEOUT" ]; then
-    echo "opencode-delegate: timeout global de ${TIMEOUT}s en la session $SESSION (ultimo status: $status_type); turno abortado" >&2
+    echo "opencode-delegate: timeout global de ${TIMEOUT}s en la session $SESSION (ultimo status: $status_type, alcance: ${SESSION_DIR:-desconocido}); turno abortado" >&2
     api -X POST "$BASE/session/$SESSION/abort" >/dev/null 2>&1 || true
     exit 4
   fi

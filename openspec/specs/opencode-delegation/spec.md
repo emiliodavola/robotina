@@ -16,6 +16,12 @@ from its token counters (OpenCode fills them only when a step closes, so an in-p
 `0/0/0/0/0` while it works), and the delegation path must pin the executor itself, because the
 merged `default_agent` is the coordinating agent on purpose.
 
+Issue #40 added the third: **a status map is not a fact about a turn, it is a fact about the
+instance that was asked.** `GET /session/status` answers for the cwd given as `directory` (the
+server's own cwd when the parameter is omitted), so a session created with `--directory` elsewhere
+is absent from the unscoped answer *while it runs*, and reading that absence as a closure lost
+healthy turns.
+
 Artifact language: English.
 
 ## Verification model
@@ -228,8 +234,12 @@ listener SHALL exist on any other port (in particular `4097`).
 
 ### Requirement: OD6 — A long tool call does not abort a healthy turn
 
-`opencode-delegate` SHALL use the server's own session status (`GET /session/status`) as its
-liveness signal and SHALL NOT abort a turn whose tool call outlives any fixed poll threshold. The
+`opencode-delegate` SHALL use the server's own session status **of the instance that owns the
+session** (`GET /session/status?directory=<path>`, with the path read back from the session itself,
+`GET /session/{id}` → `.directory`) as its liveness signal, and SHALL NOT treat the absence of a
+session from any status map as a closure unless that map was queried for the session's own
+instance. When the scope cannot be resolved the status SHALL degrade to unknown, never to closed.
+It SHALL NOT abort a turn whose tool call outlives any fixed poll threshold. The
 removed rule (`info.tokens` frozen for `STALL_POLLS` polls) SHALL NOT return: OpenCode fills those
 counters only when a step closes, so during an in-progress step the signature is identically
 `0/0/0/0/0` no matter what the turn does — measured: a healthy `sleep 25` froze it for 28 s while a
@@ -260,6 +270,46 @@ counters only when a step closes, so during an in-progress step the signature is
 - PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina /opt/robotina/bin/opencode-delegate --stall-polls 6 --timeout 180 "Run the shell command sleep 30 and then reply with exactly DONE"`
   (must exit `0` and print `DONE`; the deprecation warning on stderr is informational and is NOT
   the assertion)
+
+#### Scenario: A session outside the server's cwd is not declared closed
+
+- GIVEN a delegation with `--directory` pointing outside `/workspace`
+- WHEN the turn runs a tool call and then answers
+- THEN the helper exits `0` and prints the answer, even though the **unscoped** status map never
+  listed that session at any point of the turn
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina /opt/robotina/bin/opencode-delegate --directory /tmp --timeout 120 "Run the shell command sleep 20 and then reply with exactly DONE"`
+  (must exit `0` and print `DONE`; exit `3` with `finish=null` is the exact FAILURE this requirement
+  exists to prevent)
+- NOTE: measured before the fix, verbatim on the live stack: `VIEJO_EXIT=3` with
+  `opencode-delegate: el turno cerro sin mensaje final (finish=null)`. Across 32 polls the unscoped
+  `GET /session/status` answered `{}` every time — including while the session's `bash` tool part
+  was `running` — while `GET /session/status?directory=%2Ftmp` answered `{"type":"busy"}` and
+  flipped to `{}` exactly at `finish=stop`. With the fixed helper, on the same stack with the same
+  task and directory: exit `0`, prints `DONE`, and stderr carries `scope: liveness acotada a /tmp`.
+
+#### Scenario: The liveness query carries the session's own scope
+
+- GIVEN the change is applied
+- WHEN the helper's source is searched
+- THEN the scoped status URL is present and a verdict is never taken from an unscoped one
+- PROOF: `grep -c 'status_url="\$BASE/session/status?directory=' robotina/bin/opencode-delegate`
+  (must be exactly `1`: the URL that is actually queried carries the scope) together with
+  `grep -c '"$BASE/session/status"' robotina/bin/opencode-delegate` (must be 0)
+- NOTE: the assertions name the **code**, not the prose. A comment that documents the scoped URL or
+a discarded endpoint is not a violation; a call site is.
+
+#### Scenario: Endpoints that cannot answer are not used
+
+- GIVEN the same change
+- WHEN the helper's source is searched
+- THEN the two endpoints measured as dead ends are absent
+- PROOF: `grep -c 'status?workspace=' robotina/bin/opencode-delegate` (must be 0) together with
+  `grep -c '\$BASE/api/session/.*/wait' robotina/bin/opencode-delegate` (must be 0)
+- NOTE: measured on OpenCode 1.18.32 — `GET /session/status?workspace=/tmp` returned HTTP `500`
+  `UnknownError` on every call, and `POST /api/session/{id}/wait` returned HTTP `503`
+  `{"_tag":"ServiceUnavailableError","message":"Session wait is not available yet"}` in 10–80 ms
+  both while idle and while a turn was `busy`: it never blocks. Neither returns until a version
+  proves otherwise.
 
 ### Requirement: OD7 — An intermediate `finish=tool-calls` is not a terminal closure
 
@@ -314,6 +364,10 @@ SHALL NOT fail the turn.
 cwd `/opt/data`, so a derived default would make `/workspace` an external directory and reintroduce
 the `external_directory: ask` hang of the original incident.
 
+The same directory — read back from the server (`GET /session/{id}` → `.directory`), not echoed from
+the caller's argument — SHALL scope the liveness query of OD6, so that `--session` on a pre-existing
+session is scoped correctly even when the caller passed no `--directory`.
+
 #### Scenario: Without the flag the session uses the server's cwd
 
 - GIVEN a delegation made with no `--directory`
@@ -339,3 +393,51 @@ the `external_directory: ask` hang of the original incident.
 - THEN its `directory` is `/tmp`
 - PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina /opt/robotina/bin/opencode-delegate --directory /tmp --timeout 180 "Reply with exactly OK"`
   (capture the session id, then read `.directory` as above; must print `/tmp`)
+
+### Requirement: OD10 — The exit code names which fact happened
+
+`opencode-delegate` SHALL separate, by exit code, the facts a caller must be able to tell apart:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | the turn closed with `finish=stop`; stdout carries the answer |
+| `1` | usage error, or a transport/parse failure |
+| `2` | a named block (a pending permission nobody can answer): the helper aborts the turn |
+| `3` | the turn ended without a successful final message — a turn error, a terminal `finish` other than `stop`, or a close with no final message |
+| `4` | the global timeout: the helper aborts the turn |
+| `5` | the turn was aborted by something that is **not** this helper (`MessageAbortedError`) |
+
+`5` SHALL mean "someone else aborted the session": an abort the helper performs itself keeps its
+own code (`2` for the named block, `4` for the timeout). Before this requirement an external abort
+and a close with no final message were both `3`, so a caller could not tell "your turn ended badly"
+from "your turn was killed".
+
+Measured: an aborted assistant message has **no `finish` field at all** and carries
+`info.error = {"name":"MessageAbortedError","data":{"message":"Aborted"}}`, while an in-progress
+message carries `finish: null`. `finish` alone cannot separate those two facts; the error name is the
+discriminator. `finish` is declared as a bare `string` in the OpenAPI schema — no enum — with an
+observed domain of `{tool-calls, stop, null, absent}`.
+
+#### Scenario: An external abort is reported as an abort, not as a turn error
+
+- GIVEN a delegation whose session is aborted by someone else while its turn runs
+- WHEN the helper polls
+- THEN it exits `5` and names the abort on stderr
+- PROOF: start a delegation with a 30 s tool call in the background, read its `session: ses_…` line
+  from stderr, `POST /session/{SID}/abort` from inside the container, then assert the helper's exit
+  code is `5`
+- NOTE: measured — the background run exited `5`, and stderr carried
+  `opencode-delegate: el turno fue abortado (MessageAbortedError) en la session ses_…; el abort no lo hizo este helper`
+
+#### Scenario: The helper's own aborts keep their own codes
+
+- GIVEN a named block (`2`) or a global timeout (`4`)
+- WHEN the helper aborts the turn itself
+- THEN the exit code is `2`/`4`, never `5`
+- PROOF: the OD8 named-block proof, and a deliberately tiny `--timeout 3` against a turn that keeps
+  running (must exit `4`)
+
+#### Scenario: A clean close still reports 0
+
+- PROOF: the OD6 30 s proof (exit `0`, prints `DONE`) and the OD6 `--directory` proof (exit `0`,
+  prints `DONE`)
