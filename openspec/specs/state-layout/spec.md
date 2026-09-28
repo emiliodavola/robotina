@@ -8,6 +8,10 @@ the bind, persistence across `down`/`up`, a copy-forward non-blocking idempotent
 never-deleting migration of existing legacy host folders, and ownership fixing performed from
 inside the container (frozen: D5, proposal §8, §17 answer 2).
 
+Issue #43 added one more native volume to the same domain — the managed interpreter of `uv`, which is
+**not** a WAL store and does **not** live inside the bind — plus a boot-time cleanup of the runtime
+scratch under `/var/tmp`.
+
 This domain is **new**: `openspec/specs/` was empty before this change, so this file is a
 full domain spec and is copied verbatim into `openspec/specs/state-layout/spec.md` at archive
 time.
@@ -277,3 +281,44 @@ confirmation).
 - PROOF: human check; entry point `grep -rniE "fix-permissions" README.md README.en.md SECURITY.md`
   (any remaining match MUST be explanatory text about the removal or the proposal §14 Q7
   decision, never a setup instruction)
+
+### Requirement: SL7 — The image's managed interpreter does not live in the container layer
+
+`uv`'s managed interpreter root (`UV_PYTHON_INSTALL_DIR`) SHALL be a native Docker volume: the
+container layer is discarded by every recreate, and a path under `/opt/data` is shadowed by the bind
+in runtime. Runtime scratch under `/var/tmp` SHALL be cleaned at container start, and that cleanup
+SHALL be limited to the two known patterns (the OpenTUI shared objects and the per-invocation
+scratch directory) rather than emptying the directory.
+
+Measured on 2026-09-28: `/var/tmp` held **1.9 GB** of container-layer garbage — 1.4 GB of `uv`
+interpreters (cpython 3.10.20, 3.13.13, 3.14.4) that a **child** process of OpenCode installed
+there, plus 69 OpenTUI `.so` files of 5.5 MB each (~380 MB) extracted once per invocation and never
+removed. The OpenCode server process itself honoured the declared environment
+(`UV_PYTHON_INSTALL_DIR=/opt/uv/python`, `TMPDIR=/var/tmp`), and no configuration file in the agent's
+home mentions the offending path: the origin is a runtime child, which is why the fix is a volume
+plus a boot cleanup instead of a config change.
+
+#### Scenario: The interpreter root is a volume, not the container layer
+
+- GIVEN the change is applied
+- WHEN the declared mounts of the agent service are listed
+- THEN `/opt/uv/python` is a `volume` mount backed by a named volume
+- PROOF:
+  `docker compose config --format json | jq -r '.services.robotina.volumes[] | select(.target=="/opt/uv/python") | .type'`
+  (must print `volume`) together with
+  `docker compose config --format json | jq -r '.volumes.uv_python.name'` (must print
+  `robotina_uv_python`)
+
+#### Scenario: The boot cleanup runs, is scoped, and says what it removed
+
+- GIVEN a container that has been running long enough to accumulate leftovers
+- WHEN it is recreated
+- THEN the boot log carries the cleanup line, and immediately after the recreate no OpenTUI shared
+  object is left
+- PROOF:
+  `docker compose logs robotina | grep -c 'var/tmp limpio'` (must be ≥ 1; a 0 is a FAILURE: the
+  cont-init did not run) together with
+  `docker compose exec robotina sh -c 'ls /var/tmp/.bcd9*.so 2>/dev/null | wc -l'` (must be 0 right
+  after a recreate)
+- NOTE: the second probe MUST be read immediately after the recreate. New invocations create new
+  shared objects by design; the requirement is that they do not outlive a boot.

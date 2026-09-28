@@ -259,6 +259,14 @@ services:
       - type: volume
         source: engram_db
         target: /opt/data/.engram
+      # Interprete de `uv` (Python 3.13). Volumen NATIVO por dos motivos: dentro
+      # del bind de Windows queda ensombrecido por el montaje de /opt/data en
+      # runtime (el Dockerfile lo documenta), y en la capa del contenedor se
+      # pierde en cada recreate. Medido el 2026-09-28: el agente habia instalado
+      # 1.4 GB de interpretes bajo /var/tmp, que morian con el contenedor (#43).
+      - type: volume
+        source: uv_python
+        target: /opt/uv/python
       # El script de export, versionado en el repo y de solo lectura.
       - type: bind
         source: ./scripts/export-state.sh
@@ -307,16 +315,19 @@ services:
     # hacer el agente. Mascara de bounding set resultante: 0xeb.
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]
 
-# Bases SQLite en modo WAL: en volumenes NATIVOS anidados dentro del bind de
-# /opt/data, porque WAL sobre una carpeta de Windows puede corromperse en
-# silencio. Los nombres son los mismos de antes de la fusion, asi que el
-# rollback los vuelve a montar en sus rutas viejas. Para sacar estas dos bases
-# al host: scripts/export-state.sh.
+# Volumenes NATIVOS dentro del arbol de /opt/data y de /opt/uv: las dos bases
+# SQLite en modo WAL, porque WAL sobre una carpeta de Windows puede corromperse
+# en silencio; y el interprete de `uv`, porque en la capa del contenedor se
+# pierde en cada recreate. Los nombres de las bases son los mismos de antes de
+# la fusion, asi que el rollback las vuelve a montar en sus rutas viejas. Para
+# sacar las dos bases al host: scripts/export-state.sh.
 volumes:
   opencode_db:
     name: robotina_opencode_db
   engram_db:
     name: robotina_engram_db
+  uv_python:
+    name: robotina_uv_python
 
 networks:
   # Red privada entre el agente y el proxy.

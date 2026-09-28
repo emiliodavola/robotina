@@ -18,4 +18,8 @@ echo "robotina: engram serve (data dir $ENGRAM_DATA_DIR)" >&2
 # Marca de arranque para el reset del backoff del `finish` (ver opencode/run).
 st=/tmp/robotina; mkdir -p "$st"; date +%s > "$st/engram.start"
 
-exec s6-setuidgid hermes engram serve
+# Ruta ABSOLUTA a proposito (#42): con `engram serve` pelado, el `PATH` del
+# agente resuelve /opt/data/.local/bin/engram —una copia en el bind del host,
+# anterior a la fusion— y ensombrece el binario que la imagen fijo. El pin del
+# Dockerfile tiene que ser el que corre, no el que este en el disco.
+exec s6-setuidgid hermes /usr/local/bin/engram serve
