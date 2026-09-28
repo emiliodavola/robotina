@@ -56,8 +56,10 @@ It implements the whole contract so you do not have to:
 - pins the executor by sending `"agent"` in the `prompt_async` body (`--agent`, default `build`;
   env `ROBOTINA_OPENCODE_DELEGATE_AGENT`), so the merged `default_agent` never decides;
 - submits with `POST /session/{id}/prompt_async` (never the blocking `/message`);
-- follows the turn with the server's own `GET /session/status` (`busy`/`retry` = alive; the session
-  leaving the map = the turn is over) — never with token counts;
+- follows the turn with the server's own `GET /session/status` **scoped to the session's own
+  instance** (`?directory=<the session's directory>`): `busy`/`retry` = alive, and the session
+  leaving *that* map = the turn is over — never token counts, and never an unscoped map, which only
+  answers for the server's own cwd and is silent about a session created elsewhere;
 - probes `GET /api/session/{id}/permission` while the turn is alive: a pending permission is a
   named block — it aborts the session and reports it — instead of inventing a result;
 - **refuses to resubmit** an identical prompt already present in the session;
@@ -65,8 +67,10 @@ It implements the whole contract so you do not have to:
   (`/workspace`; it is never derived from `$PWD`);
 - prints the session id to stderr when it creates the session, and only the answer text to stdout.
 
-Exit codes: `0` finished, `2` blocked by a named condition (aborted), `3` turn error or a closure
-whose `finish` is not `stop`, `4` global timeout, `1` usage or transport error.
+Exit codes, each one naming a different fact: `0` finished, `1` usage or transport error, `2` blocked
+by a named condition (the helper aborted), `3` the turn ended without a successful final message,
+`4` global timeout (the helper aborted), `5` the turn was aborted by something that is **not** the
+helper. A slow turn is never an error.
 `OPENCODE_BASE_URL` overrides the endpoint (tests point it at a stub);
 `OPENCODE_SERVER_PASSWORD` is picked up when set; `ROBOTINA_OPENCODE_DELEGATE_MODEL` supplies the
 default model and `ROBOTINA_OPENCODE_DELEGATE_AGENT` the default agent. `--stall-polls` is still
@@ -113,7 +117,8 @@ issue: that endpoint serializes provider credentials in plain text (see `SECURIT
 `POST /session/{id}/message` is **blocking**: it waits for the whole turn. Never hand-roll the
 poll loop for a long task — call `opencode-delegate`, which submits with
 `POST /session/{id}/prompt_async` (returns immediately), pins the executor with `"agent"`, follows
-`GET /session/status` for liveness, reads the final message once the turn is over, aborts only on a
+`GET /session/status` for liveness (scoped to the session's own cwd, see the endpoint table), reads
+the final message once the turn is over, aborts only on a
 named block (a pending permission), and refuses to resubmit an identical prompt. Do not hold a
 synchronous call open across a long agent loop — that is what turns a slow turn into a transport
 timeout.
@@ -148,7 +153,7 @@ Full OpenAPI spec: `GET http://127.0.0.1:4096/doc`. Liveness: `GET /global/healt
 | GET | `/session/{id}/message` | List messages of a session |
 | GET | `/session/{id}/diff` | Working-tree diff of what it changed |
 | GET | `/session/{id}/todo` | Task list it is tracking |
-| GET | `/session/status` | Liveness of every session: `busy`/`retry` = alive, absent = the turn is over |
+| GET | `/session/status[?directory=PATH]` | Liveness of **the instance of that cwd** (the server's own cwd when omitted): `busy`/`retry` = alive, absent = that instance has nothing running. It is **not a global map**: a session created in another directory is absent from the unscoped answer *while it runs*, so never read absence as closure without passing that session's own directory. `?workspace=` returns `500`. |
 | GET | `/api/session/{id}/permission` | Pending permission requests of a session (`{"data":[...]}`; `[]` = none) |
 | POST | `/session/{id}/abort` | Stop it |
 | GET | `/agent` | Agents it exposes (and their descriptions) |
@@ -252,6 +257,7 @@ through the same allowlisted proxy.
 | `401` | A password is set on the server and the request did not send it — or it sent it with an unquoted `$AUTH` expansion. Use the `set --` pattern above. |
 | `403` with an HTML body mentioning Squid | The URL host is not in `NO_PROXY`, so the call went through the proxy and the allowlist denied it. Use `127.0.0.1`. |
 | `ProviderModelNotFoundError` (the HTTP layer shows only `{"name":"UnknownError",...,"ref":"err_…"}`) | The provider/model pair is wrong. Read `GET /config/providers` and pick a listed pair; the Go key's provider is `opencode-go`, not `opencode`. The real error text is in the server log. |
-| The blocking call times out (`sequential tool terminal timed out after 420.0s`) | You held `POST /session/{id}/message` open across a long agent loop. Switch to `POST /session/{id}/prompt_async` plus following `GET /session/status` and reading the final message once the turn is over. |
-| A session stalls: its last part is a `reasoning` part and `info.finish` stays `null` | The turn never converged. If you delegated with `opencode-delegate` it either reports the pending permission (`exit 2`, aborted) or is bounded by the global timeout (`exit 4`) — it no longer guesses from frozen tokens. Otherwise inspect it and abort (`POST /session/{id}/abort`); do **not** report a result you never got, and **never** resend the same prompt: check `GET /session/{id}/message` first. |
+| The blocking call times out (`sequential tool terminal timed out after 420.0s`) | You held `POST /session/{id}/message` open across a long agent loop. Switch to `POST /session/{id}/prompt_async` plus following `GET /session/status?directory=<the session's cwd>` and reading the final message once the turn is over. |
+| A delegation reports `exit 3` with `cerro sin mensaje final (finish=null)` on a turn that was fine | The helper in the image predates the scoped-liveness fix (#40): it read the *unscoped* status map, where a session created with `--directory` outside `/workspace` never appears, and turned that absence into a closure. Compare `md5sum /opt/robotina/bin/opencode-delegate` with `git show HEAD:robotina/bin/opencode-delegate | md5sum`: if the image's copy is the old one, the fix needs a rebuild plus `--force-recreate`, not another retry. |
+| A session stalls: its last part is a `reasoning` part and `info.finish` stays `null` | The turn never converged. If you delegated with `opencode-delegate` it reports the pending permission (`exit 2`, aborted), is bounded by the global timeout (`exit 4`), or exits `5` if something else aborted the session — it no longer guesses from frozen tokens. Otherwise inspect it and abort (`POST /session/{id}/abort`); do **not** report a result you never got, and **never** resend the same prompt: check `GET /session/{id}/message` first. |
 | `MCP error -32000: Connection closed` on an MCP server | That server's process died at startup. For local ones, run its command by hand inside the container to see the real error. |
