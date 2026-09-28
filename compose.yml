@@ -155,10 +155,16 @@ services:
       # Modelo de Hermes (NO son secretos). Los consume el cont-init
       # 30-robotina-model, que apunta `config.yaml` a este proveedor, endpoint y
       # modelo. Si no se definen en .env, se usan los defaults entre parentesis.
+      # Politica del default: es el modelo MAS BARATO del catalogo del proveedor
+      # al momento de escribirlo (hoy `muse-spark-1.3-contributor`). Los ids del
+      # catalogo cambian con el tiempo, asi que el mas barato se reverifica
+      # cuando haga falta y nunca se da por sentado. La clave de la DELEGACION
+      # (ROBOTINA_OPENCODE_DELEGATE_MODEL, mas abajo) es una perilla APARTE y no
+      # sigue esta politica.
       # Provider explicito (`opencode-go`) en vez de `auto`: con `auto` Hermes
       # resuelve al unico proveedor con credencial y adivina, y los errores se
       # vuelven indescifrables.
-      ROBOTINA_HERMES_MODEL: ${ROBOTINA_HERMES_MODEL:-deepseek-v4.1-flash}
+      ROBOTINA_HERMES_MODEL: ${ROBOTINA_HERMES_MODEL:-muse-spark-1.3-contributor}
       ROBOTINA_HERMES_MODEL_PROVIDER: ${ROBOTINA_HERMES_MODEL_PROVIDER:-opencode-go}
       ROBOTINA_HERMES_MODEL_BASE_URL: ${ROBOTINA_HERMES_MODEL_BASE_URL:-https://opencode.ai/zen/go/v1}
       # Modelo por defecto de la DELEGACION a OpenCode (NO es secreto, y NO cambia
