@@ -274,6 +274,8 @@ services:
       # runtime (el Dockerfile lo documenta), y en la capa del contenedor se
       # pierde en cada recreate. Medido el 2026-09-28: el agente habia instalado
       # 1.4 GB de interpretes bajo /var/tmp, que morian con el contenedor (#43).
+      # El volumen nace root:root y `uv` escribe `.temp` adentro: el cont-init
+      # 10-robotina-state re-owna su raiz al uid de la app en cada arranque (#70).
       - type: volume
         source: uv_python
         target: /opt/uv/python

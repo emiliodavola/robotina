@@ -197,7 +197,11 @@ RUN npm install -g --no-fund --no-audit --loglevel=error \
 #     /opt/data/.local/share/uv, queda ensombrecida por el bind de Hermes en
 #     runtime y perderia el interprete horneado, forzando una descarga que la
 #     allowlist de egreso no admite). Se persiste con un volumen propio
-#     (`robotina_uv_python`) para no re-descargarlo en cada recreate.
+#     (`robotina_uv_python`) para no re-descargarlo en cada recreate. Ese volumen
+#     nace `root:root` y `uv` escribe su staging `.temp` adentro, asi que el
+#     cont-init 10-robotina-state re-owna su raiz al uid de la app en cada
+#     arranque (#70): sin eso, `uv python install` / `uv sync` responden
+#     `permission denied writing /opt/uv/python/.temp`.
 #
 #   UV_TOOL_DIR: donde aterrizan las HERRAMIENTAS que el agente instala en
 #     runtime con `uv tool install`, cada una con su venv. Va DENTRO del bind
