@@ -31,7 +31,7 @@ FROM nousresearch/hermes-agent:latest
 # Las tres primeras vienen de la imagen de opencode anterior (paridad). Las tres
 # siguientes son nuevas y se fijan para que el merge sea reproducible: el
 # binario de opencode cambia de assets entre releases (riesgo glibc/musl).
-ARG ENGRAM_VERSION=1.20.0
+ARG ENGRAM_VERSION=2.2.1
 ARG GENTLE_AI_VERSION=3.1.0
 ARG MARKSMAN_RELEASE=2026-02-08
 ARG OPENCODE_VERSION=1.18.32
@@ -40,6 +40,13 @@ ARG TAPLO_VERSION=0.10.0
 # taplo no publica checksums.txt en su release: el pin es este sha256, medido
 # sobre taplo-linux-x86_64.gz de la version de arriba.
 ARG TAPLO_SHA256=8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156
+
+# El pin de engram se publica al contenedor para que el healthcheck pueda
+# comparar lo que CORRE contra lo que esta imagen fijo. No es decorativo: el
+# `PATH` del agente pone /opt/data/.local/bin ANTES de /usr/local/bin, asi que
+# una copia en su HOME ensombrece el binario horneado y nada lo delata (medido:
+# 2.1.0 corriendo sobre un pin de 1.20.0, ver #42).
+ENV ROBOTINA_ENGRAM_VERSION=${ENGRAM_VERSION}
 
 # pipefail: las verificaciones de checksum usan `grep ... | sha256sum -c -`.
 # Sin esto, un grep que no matchea no corta el build y la verificacion podria
