@@ -1,0 +1,94 @@
+#!/command/with-contenv sh
+# =============================================================================
+# cont-init de robotina: espeja al .env del perfil las claves que el gateway lee
+# SCOPEADAS por perfil.
+#
+# Por que existe: desde que el gateway corre en modo multiplex
+# (`gateway.multiplex_profiles: true` en config.yaml, que el vendor persiste como
+# default y cuyo `false` esta RETIRADO como opt-out), el runtime no lee estas
+# claves del entorno del contenedor: las busca en el scope de secretos del perfil,
+# que se arma desde el `.env` de cada perfil (`agent/secret_scope.py` ->
+# `build_profile_secret_scope`). Ante un miss el camino es fail-closed: devuelve
+# vacio en vez de caer a `os.environ`, para no filtrar el valor de otro perfil.
+#
+# Medido el 2026-09-28, dos sintomas del mismo defecto y los dos en silencio:
+#
+#   - `TELEGRAM_ALLOWED_USERS` fuera del scope -> allowlist vacio -> default deny
+#     -> el adapter le contesta "Blocked unauthorized user" a su propio dueno.
+#     (`gateway/platforms/_shared.py` -> `platform_gate_env`.)
+#   - `OPENCODE_GO_API_KEY` fuera del scope -> "No usable credentials found for
+#     provider 'opencode-go'" -> el bot avisa que no puede conectar al modelo.
+#     (`get_secret`, y la clave NO esta en `_GLOBAL_ENV_EXACT`.)
+#
+# Sin este espejo, CUALQUIER recreate vuelve a romper el bot: la autorizacion y la
+# credencial quedan en un archivo del bind, pero el stack las inyecta por entorno
+# del contenedor, que es justo lo que multiplex deja de mirar.
+#
+# Entradas:
+#   OPENCODE_GO_API_KEY    -> OPENCODE_GO_API_KEY     (credencial de Hermes)
+#   TELEGRAM_ALLOWED_USERS -> TELEGRAM_ALLOWED_USERS  (autorizacion del bot)
+#   ROBOTINA_PROFILE_ENV_KEYS   opcional: lista separada por espacios que
+#                               reemplaza la de arriba, para sumar claves sin
+#                               tocar este script.
+#   ROBOTINA_PROFILE_ENV_HOME   opcional: home del perfil (default /opt/data).
+#                               Redirige la comparacion Y la escritura, para
+#                               poder probar el camino de escritura contra un
+#                               archivo descartable y no contra el del agente.
+#
+# Deliberadamente NO se espeja `TELEGRAM_BOT_TOKEN`: medido, el adapter lo lee de
+# `os.environ`, asi que funciona sin el espejo y copiarlo solo ampliaria la
+# superficie del secreto. La regla es espejar lo que el runtime lee scopeado, no
+# todo lo que hay en el entorno.
+#
+# Nunca es fatal: un arranque NO se rompe porque este espejo falle. Nunca imprime
+# valores: informa el nombre de la clave y si cambio.
+# =============================================================================
+set -u
+
+HOME_DIR="${ROBOTINA_PROFILE_ENV_HOME:-/opt/data}"
+ENV_FILE="$HOME_DIR/.env"
+PYTHON=/opt/hermes/.venv/bin/python
+
+KEYS="${ROBOTINA_PROFILE_ENV_KEYS:-OPENCODE_GO_API_KEY TELEGRAM_ALLOWED_USERS}"
+
+if [ ! -x "$PYTHON" ]; then
+  echo "robotina: AVISO: no esta $PYTHON; no se puede espejar el .env del perfil (Hermes usara lo que ya haya)" >&2
+  exit 0
+fi
+
+for key in $KEYS; do
+  # `printenv` y no `eval`: la lista es nuestra, pero no hay motivo para evaluar.
+  value="$(printenv "$key" 2>/dev/null || true)"
+  if [ -z "$value" ]; then
+    echo "robotina: AVISO: $key no esta en el entorno del contenedor; no se espeja" >&2
+    continue
+  fi
+
+  # Idempotencia: si el valor ya es el mismo, no se reescribe. Evita el churn de
+  # mtime (y el rewake de cualquier watcher de config) en cada arranque.
+  current=""
+  if [ -f "$ENV_FILE" ]; then
+    current="$(grep -m1 "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' || true)"
+  fi
+  if [ "$current" = "$value" ]; then
+    echo "robotina: $key ya esta espejada; sin cambios" >&2
+    continue
+  fi
+
+  # La escritura va por el CLI del vendor (`save_env_value`), que respeta el
+  # formato y reemplaza la linea existente en lugar de duplicarla. Se corre como
+  # el uid de la app (10000) y con HOME y HERMES_HOME apuntados a HOME_DIR: los
+  # dos, para que el target del writer sea el mismo archivo que se compara arriba
+  # y no dependa de lo que el arranque haya heredado.
+  if PATH="/command:$PATH" s6-setuidgid hermes env HOME="$HOME_DIR" HERMES_HOME="$HOME_DIR" "$PYTHON" -c '
+import os, sys
+from hermes_cli.config import save_env_value
+save_env_value(sys.argv[1], os.environ[sys.argv[1]])
+' "$key" 2>/dev/null; then
+    echo "robotina: $key espejada al .env del perfil" >&2
+  else
+    echo "robotina: AVISO: no se pudo espejar $key; se continua (Hermes usara el valor previo)" >&2
+  fi
+done
+
+exit 0
