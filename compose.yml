@@ -73,7 +73,10 @@ services:
   # dejar binarios en disco ni escalar privilegios.
   # --------------------------------------------------------------------------
   egress-proxy:
-    image: ubuntu/squid:latest
+    # Tag + digest: el tag documenta el canal de upstream (`latest` existe igual),
+    # el digest es lo que hace reproducible el arranque. Sin el digest, un
+    # `up -d` puede traer otra imagen sin que nadie lo pida ni lo vea (ver #52).
+    image: ubuntu/squid:latest@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029
     container_name: egress-proxy
     restart: unless-stopped
     # El CMD de la imagen ya apunta a /etc/squid/squid.conf.

@@ -25,12 +25,21 @@
 # Nota: el build corre en el host, FUERA del proxy de egreso. Es lo mismo que
 # cualquier build de imagen; el trafico medido por Squid no incluye esto.
 # =============================================================================
-FROM nousresearch/hermes-agent:latest
+# La base va con tag Y digest. El tag documenta el canal de upstream; el digest
+# es lo que hace el build reproducible, porque `latest` se mueve solo y un build
+# que la sigue deja de poder contestar "que codigo corre". Mover el digest es un
+# commit revisable (Dependabot lo propone), no un efecto secundario de buildear.
+FROM nousresearch/hermes-agent:latest@sha256:b2e3eeb0c550d262a5d713788ca079e682b9acfc4a0d02ec614bc847bd1087a9
 
 # --- versiones fijadas --------------------------------------------------------
 # Las tres primeras vienen de la imagen de opencode anterior (paridad). Las tres
 # siguientes son nuevas y se fijan para que el merge sea reproducible: el
 # binario de opencode cambia de assets entre releases (riesgo glibc/musl).
+#
+# Estas seis NO son visibles para Dependabot: su parser de `docker` resuelve tags
+# de `FROM` e `image:`, no valores de `ARG`, y no hay ecosistema para un tarball
+# de releases de GitHub. Para esas seis esta `scripts/bump-tools.sh`, que resuelve
+# la ultima version y reescribe el pin (ver #52).
 ARG ENGRAM_VERSION=2.2.1
 ARG GENTLE_AI_VERSION=3.1.0
 ARG MARKSMAN_RELEASE=2026-02-08
