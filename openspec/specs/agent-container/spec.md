@@ -408,3 +408,35 @@ credential denylist.
 - PROOF:
   `docker compose exec -T robotina /opt/hermes/.venv/bin/python -c 'import sys; sys.path.insert(0, "/opt/hermes"); from agent.file_safety import get_safe_write_roots; print(sorted(get_safe_write_roots()))'`
   (prints `['/opt/data', '/workspace']`)
+
+### Requirement: AC11 — The binary the image pins is the binary that runs
+
+For a tool the image pins, the supervised process SHALL NOT depend on a `PATH` resolution that the
+agent's own home directory can shadow, and the container healthcheck SHALL compare the version that
+runs with the version the image recorded. Measured origin: `engram` ran as **2.1.0** from a copy in
+the agent's home (older than the merge) under a Dockerfile pin of **1.20.0**, and nothing surfaced
+it — the same image could have had its memory backend replaced by anyone able to write that file
+(#42).
+
+#### Scenario: The supervised service execs an absolute path
+
+- GIVEN the change is applied
+- WHEN the s6 run script of `engram` is read
+- THEN it execs the image's binary by absolute path, not by name
+- PROOF: `grep -c 'exec s6-setuidgid hermes /usr/local/bin/engram serve' robotina/s6/s6-rc.d/engram/run`
+  (must be exactly 1)
+
+#### Scenario: The healthcheck compares running against pinned
+
+- GIVEN a container whose image recorded `ROBOTINA_ENGRAM_VERSION`
+- WHEN the healthcheck runs
+- THEN it fails when the binary reports another version, and when `PATH` resolves `engram` to
+  anything other than the image's copy
+- PROOF:
+  `docker compose exec robotina sh -c 'echo "$ROBOTINA_ENGRAM_VERSION"; /usr/local/bin/engram --version'`
+  (the two versions MUST match) together with
+  `docker compose exec robotina sh -c 'command -v engram'` (must print `/usr/local/bin/engram`)
+- NOTE: the `PATH` assertion is the one that catches the shadow, and it fails until the shadowing
+  copy in the agent's home is quarantined. That quarantine is part of the maintenance window
+  procedure, not of the image build — deliberate, so the state change stays visible instead of
+  happening inside a build.
