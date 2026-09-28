@@ -309,6 +309,22 @@ plus a boot cleanup instead of a config change.
   `docker compose config --format json | jq -r '.volumes.uv_python.name'` (must print
   `robotina_uv_python`)
 
+#### Scenario: The interpreter volume root is writable by the app uid
+
+- GIVEN the change is applied and the container is running
+- WHEN the interpreter volume root is inspected as the app uid
+- THEN the app uid owns it and can write in it, because `uv` stages its `.temp` directory there
+- PROOF:
+  `docker compose exec -T robotina sh -c 'test "$(stat -c %u /opt/uv/python)" = "$(id -u hermes)" && test "$(stat -c %g /opt/uv/python)" = "$(id -g hermes)" && echo OWNED-BY-APP'`
+  (must print `OWNED-BY-APP`) together with
+  `docker compose exec -T robotina sh -c 'PATH=/command:$PATH; s6-setuidgid hermes test -w /opt/uv/python && echo WRITE-OK || echo WRITE-DENIED'`
+  (must print `WRITE-OK`; `WRITE-DENIED` is the exact #70 failure measured on 2026-09-28) and the
+  re-own is announced at boot: `docker compose logs robotina | grep -c 'raices de volumen re-ownadas'`
+  (must be ≥ 1; the line is only reached after all three `chown`s succeeded under `set -e`)
+- NOTE: a named volume initialized from the image is `root:root`, so the boot re-own in
+  `10-robotina-state` is what makes it writable. It is idempotent, so it also repairs an existing
+  root-owned volume — which a build-time `chown` could not do.
+
 #### Scenario: The boot cleanup runs, is scoped, and says what it removed
 
 - GIVEN a container that has been running long enough to accumulate leftovers

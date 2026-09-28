@@ -579,7 +579,7 @@ del bind `/opt/data`. No es capricho: es una medición.
 | Backups en JSON | `${HOST_DATA_DIR}/backups` | Salida de `scripts/export-state.sh`. |
 | `opencode.db` (sesiones) | volumen `robotina_opencode_db`, montado en `/opt/data/.local/share/opencode` | Usa **WAL**, y ver más abajo. |
 | `engram.db` (memoria) | volumen `robotina_engram_db`, montado en `/opt/data/.engram` | Usa **WAL**, idem. |
-| Tooling del agente (`uv tool install`) | `${HOST_DATA_DIR}/hermes/.local/share/uv-tools`, con los ejecutables linkeados en `…/hermes/.local/bin` | Es **estado del agente**, no de la imagen: si viviera en la capa del contenedor se perderia entero en cada recreate, y si el bin quedara fuera del `PATH`, la herramienta existiria sin poder invocarse (medido en #44). El interprete que si hornea la imagen va aparte, en el volumen `robotina_uv_python` (`/opt/uv/python`). |
+| Tooling del agente (`uv tool install`) | `${HOST_DATA_DIR}/hermes/.local/share/uv-tools`, con los ejecutables linkeados en `…/hermes/.local/bin` | Es **estado del agente**, no de la imagen: si viviera en la capa del contenedor se perderia entero en cada recreate, y si el bin quedara fuera del `PATH`, la herramienta existiria sin poder invocarse (medido en #44). El interprete que si hornea la imagen va aparte, en el volumen `robotina_uv_python` (`/opt/uv/python`), y su raiz se re-owna al uid de la app en cada arranque (`10-robotina-state`): un volumen nativo nace `root:root` y `uv` necesita escribir su staging `.temp` ahi (medido en #70). |
 | Logs del proxy | tmpfs | No persisten a propósito: no dejamos tráfico ni credenciales en disco. |
 
 ### Segundo plano de configuración: el `.env` de Hermes
