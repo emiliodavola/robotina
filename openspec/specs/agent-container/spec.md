@@ -440,3 +440,49 @@ it — the same image could have had its memory backend replaced by anyone able 
   copy in the agent's home is quarantined. That quarantine is part of the maintenance window
   procedure, not of the image build — deliberate, so the state change stays visible instead of
   happening inside a build.
+
+### Requirement: AC12 — Runtime-provisioned tooling lands inside the bind and is invocable by name
+
+Tools the agent installs at runtime (`uv tool install`) SHALL land inside the bind — `UV_TOOL_DIR`
+under `/opt/data` — and their executables SHALL be linked into a directory that is already on the
+stack's `PATH` (`UV_TOOL_BIN_DIR=/opt/data/.local/bin`). The image's managed interpreter SHALL keep
+its own location and its own volume: a baked artifact and a runtime artifact have **opposite**
+persistence requirements, and one variable set must not conflate them.
+
+Measured origin (#44): the agent installed `kaggle` into `/opt/data/cache/uv-tools` — neither the
+declared `UV_TOOL_DIR` nor a persistent location — and linked it into `/opt/data/bin`, which is
+**not on the `PATH`**, so `command -v kaggle` failed while the tool was installed **and** its
+credential was in place. Before that, the declared `UV_TOOL_DIR=/opt/uv/tools` did not exist at all,
+and had it existed it would have lived in the container layer: gone on every recreate.
+
+#### Scenario: The declared directories are in the bind and the bin directory is on the `PATH`
+
+- GIVEN the change is applied
+- WHEN the running container's `uv` environment and `PATH` are read
+- THEN the tool directory is under `/opt/data`, the bin directory is on the `PATH`, and the
+  interpreter directory is the volume
+- PROOF:
+  `docker compose exec robotina sh -c 'printf "TOOL=%s\nBIN=%s\nPY=%s\n" "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$UV_PYTHON_INSTALL_DIR"; case ":$PATH:" in *":$UV_TOOL_BIN_DIR:"*) echo "BIN EN PATH";; *) echo "BIN FUERA DEL PATH";; esac'`
+  (`TOOL` must start with `/opt/data/`, `BIN` must be `/opt/data/.local/bin`, `PY` must be
+  `/opt/uv/python` — backed by the `robotina_uv_python` volume — and the last line must print
+  `BIN EN PATH`)
+
+#### Scenario: A runtime-installed tool is resolvable by name
+
+- GIVEN a tool installed with the declared configuration
+- WHEN the agent looks it up by name
+- THEN it resolves, and it resolves from the bin directory above
+- PROOF:
+  `docker compose exec -T -u hermes robotina sh -c 'command -v kaggle && kaggle --version'`
+  (must print the wrapper path under `/opt/data/.local/bin` and the CLI version; a bare
+  `not found` is the exact FAILURE this requirement exists to prevent)
+
+#### Scenario: The image does not depend on those two variables
+
+- GIVEN a fresh container with no runtime-installed tools
+- WHEN the image's own inventory is asserted
+- THEN the build installs only the managed interpreter, so moving `UV_TOOL_DIR`/
+  `UV_TOOL_BIN_DIR` cannot change the image
+- PROOF: `grep -cE '^RUN .*uv tool install' robotina/Dockerfile` (must be 0; the pattern names the
+  **code**, not the prose — the header comment mentions `uv tool install` on purpose, and a proof that
+  matches comments is not a proof)
