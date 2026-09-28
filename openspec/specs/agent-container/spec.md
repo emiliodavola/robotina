@@ -467,6 +467,20 @@ and had it existed it would have lived in the container layer: gone on every rec
   `/opt/uv/python` — backed by the `robotina_uv_python` volume — and the last line must print
   `BIN EN PATH`)
 
+#### Scenario: The interpreter directory is writable by the app uid
+
+- GIVEN the change is applied and the container is running
+- WHEN the interpreter volume root is checked as the app uid
+- THEN the app uid owns it and can write in it, because `uv` writes its staging `.temp` there
+- PROOF:
+  `docker compose exec -T robotina sh -c 'test "$(stat -c %u /opt/uv/python)" = "$(id -u hermes)" && test "$(stat -c %g /opt/uv/python)" = "$(id -g hermes)" && echo OWNED-BY-APP'`
+  (must print `OWNED-BY-APP`) together with
+  `docker compose exec -T robotina sh -c 'PATH=/command:$PATH; s6-setuidgid hermes test -w /opt/uv/python && echo WRITE-OK || echo WRITE-DENIED'`
+  (must print `WRITE-OK`; `WRITE-DENIED` is the exact FAILURE of #70, measured on 2026-09-28)
+- NOTE: the re-own runs in the boot cont-init `10-robotina-state`, so a rebuilt and recreated
+  container is what makes this pass; until then the checked-out change is exercised by the static
+  proofs and the assertions above stay red on the running container on purpose.
+
 #### Scenario: A runtime-installed tool is resolvable by name
 
 - GIVEN a tool installed with the declared configuration

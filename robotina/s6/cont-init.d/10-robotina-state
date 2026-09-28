@@ -38,7 +38,9 @@ gid="$(id -g hermes)"
 # el directorio que la app crea por su cuenta (.local/state) y el cache XDG que
 # usa el run de opencode (XDG_CACHE_HOME=/opt/data/.cache).
 # No se listan las dos raices de volumen anidadas (.engram y
-# .local/share/opencode): ya existen como monturas y se re-ownan en el paso 3.
+# .local/share/opencode): ya existen como monturas y se re-ownan en el paso 3,
+# que ademas cubre la tercera raiz de volumen, /opt/uv/python, FUERA de /opt/data
+# y por eso invisible para el `find` de mas abajo.
 install -d -o "$uid" -g "$gid" \
   /opt/data/.config \
   /opt/data/.config/opencode \
@@ -88,10 +90,19 @@ if [ -n "$missing" ]; then
     -exec chown "$uid:$gid" {} +
 fi
 
-# --- 3. Dueno explicito y acotado de las dos raices de volumen ---------------
+# --- 3. Dueno explicito y acotado de las TRES raices de volumen --------------
 # El paso 2 las salteo a proposito (son otro filesystem). Se re-ownan aca,
-# recursivo pero acotado a dos directorios, para que las bases SQLite en modo WAL
-# queden escribibles por el uid de la app.
-chown -R "$uid:$gid" /opt/data/.engram /opt/data/.local/share/opencode
+# recursivo pero acotado a tres directorios, para que las bases SQLite en modo
+# WAL y el interprete de `uv` queden escribibles por el uid de la app.
+#
+# La tercera es /opt/uv/python (volumen `robotina_uv_python`), FUERA de /opt/data:
+# un volumen nativo nace `root:root` y `uv` escribe su staging `.temp` adentro,
+# asi que sin este re-own `uv python install` / `uv sync` mueren con
+# `permission denied writing /opt/uv/python/.temp` (medido en #70: la raiz
+# responde NOT-WRITABLE para uid 10000). El chown del Dockerfile no alcanza:
+# solo cubriria un volumen FRESCO, y el que ya existe seguiria root-owned. Este
+# re-own es idempotente y cubre los dos casos en cada arranque.
+chown -R "$uid:$gid" /opt/data/.engram /opt/data/.local/share/opencode /opt/uv/python
+echo "robotina: raices de volumen re-ownadas a $uid:$gid (.engram, opencode, uv/python)" >&2
 
 echo "robotina: estado listo (uid=$uid gid=$gid)"
