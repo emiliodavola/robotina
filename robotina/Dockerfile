@@ -29,7 +29,7 @@
 # es lo que hace el build reproducible, porque `latest` se mueve solo y un build
 # que la sigue deja de poder contestar "que codigo corre". Mover el digest es un
 # commit revisable (Dependabot lo propone), no un efecto secundario de buildear.
-FROM nousresearch/hermes-agent:latest@sha256:b2e3eeb0c550d262a5d713788ca079e682b9acfc4a0d02ec614bc847bd1087a9
+FROM nousresearch/hermes-agent:latest@sha256:d4da4a40cd7a28aba983775d9fd31d94cbf153eeb0cb9e844d6d0f612b7c24db
 
 # --- versiones fijadas --------------------------------------------------------
 # Las tres primeras vienen de la imagen de opencode anterior (paridad). Las tres
