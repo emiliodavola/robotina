@@ -116,10 +116,12 @@ Until then, `--dry-run` is the only reconcile command that runs.
 - [x] T7 — Push the branch and open the PR against `main`, assigned to `emiliodavola`: **PR #53**
       (4 commits: tracker, allowlist, model default, security docs). Static validation
       (`docker compose config -q`) green before the push. Merge stays the owner's decision.
-- [ ] T8 — **Owner action, blocked for this agent**: `.env.example` line 30 still says
-      `default: deepseek-v4.1-flash`. The repo-local safety guard refuses every `.env*` path to the
-      editor tool (the writer refused to route around it and so did the parent), and the owner chose
-      to apply the line by hand. Until then the template contradicts `compose.yml`.
+- [x] T8 — `.env.example` line 30 now carries the new default, and the assignment block at the foot
+      keeps bare `KEY=` lines. The repo-local safety guard refuses every `.env*` path to the editor
+      tools (the writer refused to route around it and so did the parent), so the owner applied the
+      two lines by hand; this branch commits them (`chore/env-example-model-default`).
+      **Measured rationale for keeping the keys bare:** Docker Compose reads an inline comment as
+      *part of the value*, so a comment on a real key does not document it, it corrupts it.
 
 ## Route declaration
 
