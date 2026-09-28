@@ -53,6 +53,9 @@
 #                             constante: los defaults del stack cambian.
 #   ROBOTINA_OPENCODE_DELEGATE_AGENT
 #                             agente ejecutor por defecto (default `build`).
+#   ROBOTINA_OPENCODE_DELEGATE_TIMEOUT
+#                             presupuesto global del turno, en segundos (default
+#                             1800). `--timeout` lo pisa.
 #
 # Salidas: 0 turno terminado (`info.finish == "stop"`), 2 bloqueo nombrado
 # (permission pendiente; el turno se aborta), 3 error del turno o cierre
@@ -90,7 +93,13 @@ AGENT="${ROBOTINA_OPENCODE_DELEGATE_AGENT:-build}"
 DIRECTORY=""
 # Deprecado: se acepta (y se valida) para no romper callers viejos, y se ignora.
 STALL_POLLS=6
-TIMEOUT=900
+# Presupuesto global del turno, en segundos. 1800 y no 900: medido en #69, tres
+# turnos multi-fase (exploracion + edicion + red como `uv sync` + git/GitHub) se
+# abortaron con el default viejo de 15 min. La perilla se lee del entorno, igual
+# que el modelo y el agente; `--timeout` la pisa. Un techo mas alto NO es licencia
+# para un mega-turno: partir la tarea en delegaciones de una fase sigue siendo lo
+# correcto, y esta linea es solo la red de seguridad.
+TIMEOUT="${ROBOTINA_OPENCODE_DELEGATE_TIMEOUT:-1800}"
 INTERVAL=2
 SESSION=""
 
@@ -114,6 +123,12 @@ uso: opencode-delegate [--session SID] [--agent NAME] [--directory PATH]
   --agent NAME       agente ejecutor (default ROBOTINA_OPENCODE_DELEGATE_AGENT
                      o `build`). Se manda explicito en prompt_async.
   --directory PATH   cwd de la sesion nueva (default: el del server, /workspace)
+  --timeout SEC      presupuesto global del turno (default
+                     ROBOTINA_OPENCODE_DELEGATE_TIMEOUT o 1800). Un turno que
+                     combina exploracion + edicion + red + git/GitHub puede
+                     superarlo: partilo en delegaciones de una fase antes que
+                     estirar este techo hasta que aguante todo.
+  --interval SEC     intervalo entre polls del estado del server (default 2).
   --stall-polls N    DEPRECADO: ya no afecta el comportamiento; el estado del
                      server ACOTADO A LA SESION (GET /session/status?directory=)
                      es la autoridad de liveness.
@@ -196,6 +211,7 @@ if [ "$stall_polls_set" = 1 ]; then
   echo "opencode-delegate: --stall-polls esta deprecado y ya no afecta el comportamiento; el estado del server acotado a la sesion (GET /session/status?directory=) es la autoridad de liveness" >&2
 fi
 case "$TIMEOUT" in '' | *[!0-9]*) echo "opencode-delegate: --timeout invalido: $TIMEOUT" >&2; exit 1 ;; esac
+[ "$TIMEOUT" -ge 1 ] || { echo "opencode-delegate: --timeout invalido: $TIMEOUT (se espera un entero positivo)" >&2; exit 1; }
 case "$INTERVAL" in '' | *[!0-9.]*) echo "opencode-delegate: --interval invalido: $INTERVAL" >&2; exit 1 ;; esac
 
 # `gentle-orchestrator` coordina sub-agentes y no ejecuta inline: el turno puede
