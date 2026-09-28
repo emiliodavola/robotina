@@ -75,20 +75,28 @@ prerequisites of #42 and #43.
 
 ## Residual risk (declare it, do not paper over it)
 
-The window moves `engram` from the running **2.1.0** to the pinned **2.2.1** over the *same* WAL
-`engram.db`. **Measured 2026-09-28: the readable content of that store is empty.** `engram stats`
-reports `Sessions: 0`, `Observations: 0`, and `engram export` writes 135 bytes of empty arrays, while
-the volume holds 6.4 MB of `engram.db` + `engram.db-wal` and four `engram mcp` processes (plus the
-supervised `engram serve`) are alive with `ENGRAM_DATA_DIR=/opt/data/.engram` pointing at it.
+**This section was wrong twice, and both corrections came from measuring.** The final, verified
+reading of the `engram` store:
 
-Two consequences, and they pull in opposite directions:
+| Reader | Invocation | Result |
+| --- | --- | --- |
+| `engram` 1.20.0 (the image's) | `stats`, no flags | 122 observations, 112 prompts, 109 sessions |
+| `engram` 2.1.0 (the home copy the service ran) | `search "probe" --all` | finds the real observations |
+| `engram` 2.2.1 (the pin this window introduces) | `search "probe" --all` **on the old store, in place** | finds them; `ENGRAM_PROJECT=sofer stats` → 115 |
+| any 2.x | `export <path>` **without `--all`**, from `/opt/data` | **0 observations, 135 bytes, exit 0** |
 
-- The version migration has (almost) nothing to migrate, so it is **less** risky than this tracker
-  first assumed.
-- But a memory backend that reports zero observations is not a memory, and the JSON export protects
-  nothing. That discrepancy is a defect of its own, recorded here and to be filed separately — it
-  does **not** block the window (the window is about *which* binary runs), but it must never be read
-  as "the memory is fine because the export ran".
+So **the memory is intact and every version reads it**. What 2.x scopes by project is `export` and
+`stats`, and that is a defect of its own (#58): the repository's documented backup of the brain wrote
+empty arrays *successfully*. It does not block this window, and it is not a migration problem.
+
+Consequences for the window:
+
+- **No migration step is needed**: 2.2.1 reads the old store in place. The volume snapshot in the
+  procedure stays as hygiene, not as a prerequisite. (The export/import round-trip also works —
+  122 imported, 0 lost — as a fallback, and neither version has a `migrate` command.)
+- The 2.2.1 pin is the right call under the owner's "latest wins" policy.
+- `scripts/export-state.sh` was fixed in the same PR that corrected this section: it exports with
+  `--all` and fails loudly when the export comes out empty.
 
 Secondary finding from the same measurement: four `engram mcp --tools=agent` processes are alive at
 once (one per OpenCode session that used the MCP, and none of them reaped), each holding the same
