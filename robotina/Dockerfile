@@ -189,15 +189,32 @@ RUN npm install -g --no-fund --no-audit --loglevel=error \
  && codegraph --version
 
 # --- 6. uv + CPython 3.13 fuera de toda montura ------------------------------
-# UV_* apuntan a /opt/uv, una ruta de IMAGEN que ninguna montura tapa (la
-# alternativa, /opt/data/.local/share/uv, queda ensombrecida por el bind de
-# Hermes en runtime y perderia el interprete horneado, forzando una descarga
-# que la allowlist de egreso no admite). `python3`/`python` se exponen en
-# /opt/uv/bin. El PATH se APPENDEA (nunca se prependea) para que el venv de
-# Hermes conserve prioridad.
+# Tres cosas distintas con necesidades distintas, y confundirlas es exactamente
+# el bug de #44:
+#
+#   UV_PYTHON_INSTALL_DIR: el INTERPRETE que hornea la imagen. Va en /opt/uv,
+#     una ruta de imagen que ninguna montura tapa (la alternativa,
+#     /opt/data/.local/share/uv, queda ensombrecida por el bind de Hermes en
+#     runtime y perderia el interprete horneado, forzando una descarga que la
+#     allowlist de egreso no admite). Se persiste con un volumen propio
+#     (`robotina_uv_python`) para no re-descargarlo en cada recreate.
+#
+#   UV_TOOL_DIR: donde aterrizan las HERRAMIENTAS que el agente instala en
+#     runtime con `uv tool install`, cada una con su venv. Va DENTRO del bind
+#     (/opt/data/...), porque es estado del agente y tiene que sobrevivir a los
+#     recreates: en /opt/uv/tools vivia en la capa del contenedor y se perdia
+#     entero. Medido (#44): el agente habia instalado kaggle en
+#     /opt/data/cache/uv-tools, que no era el directorio declarado.
+#
+#   UV_TOOL_BIN_DIR: los symlinks con los que esas herramientas se invocan por
+#     nombre. Va a /opt/data/.local/bin, que YA esta en el PATH del stack (antes
+#     de /usr/local/bin) y ya es donde vive el tooling del agente (rtk). En
+#     /opt/uv/bin los symlinks morian con el contenedor, y ademas /opt/uv/bin es
+#     la ULTIMA entrada del PATH. `/opt/uv/bin` sigue quedando para los
+#     symlinks de python3/python, que arma el RUN de abajo.
 ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python \
-    UV_TOOL_DIR=/opt/uv/tools \
-    UV_TOOL_BIN_DIR=/opt/uv/bin \
+    UV_TOOL_DIR=/opt/data/.local/share/uv-tools \
+    UV_TOOL_BIN_DIR=/opt/data/.local/bin \
     UV_LINK_MODE=copy \
     UV_PYTHON_PREFERENCE=only-managed
 RUN uv python install 3.13 \
