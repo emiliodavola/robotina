@@ -112,9 +112,9 @@ with the JSON export already on disk in case the migration is not what engram pr
 - [x] T5 — Static verification: `docker compose config -q`, `dash -n` on all four touched shell
       files with the container's own parser, and every new spec assertion checked by hand — including
       the version parser against **both** `engram` binaries (1.20.0 with its banner, and 2.1.0).
-- [ ] T6 — `scripts/bump-tools.sh` (the one-command "take the latest" for the `ARG`-pinned tools).
-      Ships in its own chained PR: it does not touch the container, so the window does not wait for
-      its review.
+- [x] T6 — `scripts/bump-tools.sh` (the one-command "take the latest" for the `ARG`-pinned tools).
+      Ships in the chained PR based on this branch: it does not touch the container, so the window
+      does not wait for its review.
 - [ ] T7 — Commits per work unit, push, PR against `main` assigned to the owner (and the chained PR
       for T6 based on this branch).
 
