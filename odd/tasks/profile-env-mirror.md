@@ -71,8 +71,15 @@ change with its own evidence.
       and it is refreshed at boot.
 - [x] T4 — Verify: syntax with the container's own `dash`, the idempotency path against the live
       file, and the write path against a throwaway file.
-- [ ] T5 — Commits per work unit, push, PR against `main` assigned to the owner, and the issue that
-      documents the defect class.
+- [x] T5 — Commits per work unit, push, PR against `main` assigned to the owner (**PR #61**), and the
+      issue that documents the defect class (**#62**).
+
+## Pending after this PR
+
+- The cont-init only runs after a `build` + `up -d`: it is baked into the image, so until that pair
+  runs, the mirrored keys live in the bind and survive restarts but the boot step is not there yet.
+- The next scoped key someone needs gets added to `ROBOTINA_PROFILE_ENV_KEYS` **together with the read
+  site that needs it** — that is the rule this tracker closes with.
 
 ## Note on the live state
 
