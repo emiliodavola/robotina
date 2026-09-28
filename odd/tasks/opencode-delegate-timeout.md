@@ -50,7 +50,8 @@ Branch: `fix/issue-69-delegate-timeout`, off `main`. Owner: `emiliodavola`.
 - [x] T6 — Static verification: `sh -n`, `--help`, the OD11 greps, `docker compose config -q`, and the
       behavioral proof of the environment override (exit `4`, `timeout global de 3s`); independent
       read-only verifier over the diff and the spec assertions.
-- [ ] T7 — Commit per work unit, push, PR against `main` assigned to the owner.
+- [x] T7 — Commit per work unit, push, PR against `main` assigned to the owner: **PR #72**
+      (3 commits: tracker, fix, specs/docs).
 
 ## Pending after this PR
 
