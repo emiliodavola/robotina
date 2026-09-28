@@ -1,0 +1,62 @@
+# Dependabot — version updates para lo que SI puede ver este repo.
+#
+# Alcance real, medido (issue #52):
+#
+#   - `docker` (el Dockerfile de robotina): actualiza el digest de la imagen base.
+#   - `docker-compose` (compose.yml): actualiza el digest de la imagen del proxy.
+#
+# Lo que NO cubre, y por eso no esta aca:
+#
+#   - Las seis dependencias que el Dockerfile fija en `ARG` (engram, gentle-ai,
+#     marksman, gh, taplo, opencode-ai). El parser `docker` de Dependabot
+#     resuelve tags de `FROM` e `image:`, no valores de `ARG`. Para esas seis
+#     esta `scripts/bump-tools.sh` (`--check` reporta, `--write` mueve el pin).
+#   - Los tarballs de releases de GitHub (gh, engram, taplo, marksman, gentle-ai)
+#     y los paquetes de `apt` sin lockfile: no hay ecosistema.
+#   - Los paquetes npm instalados dentro del Dockerfile: el ecosistema `npm` se
+#     define sobre un `package.json`, y este repo no tiene ninguno.
+#
+# PREREQUISITO DE PLATAFORMA, medido el 2026-09-28 y NO cumplido todavia:
+#
+#   - `dependabot_security_updates`: `disabled`
+#   - `repos/.../actions/permissions`: `enabled=false` (GitHub Actions esta
+#     deshabilitado en este repo, como declara openspec/project.md)
+#
+#   Dependabot version updates son un servicio de GitHub, no un workflow de
+#   Actions, asi que este archivo no depende de Actions. Pero mientras la
+#   funcionalidad este deshabilitada en los ajustes del repositorio, el archivo
+#   es inerte: hay que habilitarla en Settings -> Code security. Un archivo de
+#   configuracion no enciende la funcionalidad por si solo.
+#
+# Politica de bumps: agrupados y semanales, no una PR por dependencia. Este repo
+# se verifica a mano (no hay CI ni test runner: openspec/config.yaml declara
+# `runner: none`), y un bump de la imagen base o del proxy no es trivial — el
+# binario de opencode ya tuvo un incidente de asset glibc/musl.
+version: 2
+
+updates:
+  # La imagen base del agente: `FROM` en robotina/Dockerfile.
+  - package-ecosystem: docker
+    directory: /robotina
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      base-image:
+        patterns: ["*"]
+
+  # Las imagenes declaradas en compose.yml (hoy: el proxy de egreso).
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      compose-images:
+        patterns: ["*"]
