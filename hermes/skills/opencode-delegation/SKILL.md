@@ -249,6 +249,30 @@ free tier (8 models, default `big-pickle`), and does not contain `deepseek-v4.1-
 OpenCode reads and writes the same files you can, and it cannot reach the Internet except
 through the same allowlisted proxy.
 
+## `rtk`: the agent's own output filter (not part of the stack)
+
+The bash tool sometimes runs commands through `rtk`, a CLI proxy that filters and summarizes command
+output before it reaches the model's context. Measured facts, and why they matter here:
+
+- **It is not declared anywhere in this repository.** It lives in the agent's home, at
+  `/opt/data/.local/bin/rtk` (v0.49.0, mode 700). The image does not bake it. It is on `PATH` only
+  because `/opt/data/.local/bin` precedes `/usr/local/bin` — the same ordering that let a stale
+  `engram` shadow the image's binary (AC11 in `agent-container`).
+- **It is load-bearing in practice.** In the report behind #40, the commands prefixed with `rtk`
+  completed while `git -C <dir> status --short` **without** the prefix stayed `running`. When a
+  command hangs and the same command through `rtk` does not —or the other way around— that difference
+  is the first thing to check, not the last.
+- **The output you read may be a summary.** A filtered output is not the command's exit status and
+  not its full text: never read it as proof that a command succeeded. When the exact text or the exit
+  code matters, run it without the filter.
+- **A fresh image does not bring it.** It lives in the bind, so it survives recreates, but it is not
+  part of the container's inventory. Do not assume it is there.
+
+Not declaring it is a decision, not an oversight: pinning it would mean owning a third-party tool that
+this stack does not ship, and it is the agent who installs and uses it. What this repository owes is
+that the tool be **visible** — a program that changes what the bash tool returns, that nothing here
+mentions, is how a bug report ends up saying "could not reproduce" (#45).
+
 ## Troubleshooting
 
 | Symptom | Cause |
