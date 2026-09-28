@@ -55,11 +55,11 @@ Branch: `fix/issue-69-delegate-timeout`, off `main`. Owner: `emiliodavola`.
 
 ## Pending after this PR
 
-- `.env.example`: the repo-local safety guard refuses every `.env*` path to the editor, so the new
-  bare `ROBOTINA_OPENCODE_DELEGATE_TIMEOUT=` line is an owner hand-off and is committed to this
-  branch once applied — the same path `live-config-drift` T8 took. The key itself is already
-  documented in `compose.yml`, the skill, `.hermes.md` and OD11, and its default (`1800`) is baked
-  into the compose interpolation, so a missing line in the sample changes nothing at runtime.
+- `.env.example` — **closed**: the owner applied the bare `ROBOTINA_OPENCODE_DELEGATE_TIMEOUT=` line
+  by hand (the repo-local safety guard refuses every `.env*` path to the editor, and routing around
+  it was refused on purpose — the same path `live-config-drift` T8 took) and this branch commits it.
+  The line is bare, with no inline comment, because Docker Compose reads an inline comment as part
+  of the value.
 - A rebuild plus `--force-recreate` is what puts the new helper in `/opt/robotina/bin`, same as any
   helper change; until then the change is exercised through the stale-image recipe.
 
