@@ -1,0 +1,78 @@
+#!/command/with-contenv sh
+# =============================================================================
+# cont-init de robotina: alcance de `safe.directory` e identidad de git.
+#
+# Por que existe (#50): el config global de git del agente tenia UNA sola linea,
+# `safe.directory=*`, y ninguna identidad. Son dos problemas distintos:
+#
+#   1. `safe.directory=*` desactiva la verificacion de propiedad de git para
+#      CUALQUIER repositorio, no para el que lo necesita. Medido el 2026-09-28:
+#      con `safe.directory=/workspace` a secas, `/workspace/sofer` sigue
+#      fallando; con `/workspace/*` funciona; y los repos creados en /tmp por el
+#      propio uid de la app no disparan la verificacion en absoluto. O sea que
+#      alcanza con dos entradas, y el comodin no cubre nada mas que ellas.
+#
+#   2. Sin `user.name`/`user.email`, el autor de los commits del agente queda
+#      librado a lo que git pueda sintetizar del entorno. El flujo de este repo
+#      (trackers ODD, commits por work unit, PRs) depende de que el agente
+#      commitee, asi que la identidad tiene que ser explicita y declarada.
+#
+# Entradas (opcionales; sin ellas la identidad NO se toca, solo el alcance):
+#   ROBOTINA_GIT_USER_NAME   -> user.name
+#   ROBOTINA_GIT_USER_EMAIL  -> user.email
+#
+# Los valores viven en el `.env` del repo (gitignoreado), no aca: el repo declara
+# el mecanismo, no la identidad de una persona.
+#
+# Nunca es fatal: un arranque no se rompe por un detalle de configuracion de git.
+# Nunca imprime valores de secretos (no maneja ninguno; nombre y email no lo son).
+# =============================================================================
+set -u
+
+HOME_DIR=/opt/data
+CFG="${GIT_CONFIG_GLOBAL:-$HOME_DIR/.config/git/config}"
+
+# Todas las escrituras van como el uid de la app, igual que el resto del estado.
+git_agent() {
+  PATH="/command:$PATH" s6-setuidgid hermes env HOME="$HOME_DIR" GIT_CONFIG_GLOBAL="$CFG" git "$@"
+}
+
+# --- 1. alcance de safe.directory -------------------------------------------
+# `--unset-all` primero, y no `--add` a secas: si el comodin quedo de antes,
+# agregar sin borrar solo ampliaria la lista, que es exactamente lo contrario.
+want="/workspace /workspace/* "
+current="$(git_agent config --global --get-all safe.directory 2>/dev/null | sort | tr '\n' ' ' || true)"
+if [ "$current" = "$want" ]; then
+  echo "robotina: safe.directory ya esta acotado a /workspace y /workspace/*; sin cambios" >&2
+else
+  git_agent config --global --unset-all safe.directory >/dev/null 2>&1 || true
+  git_agent config --global --add safe.directory /workspace >/dev/null 2>&1 || true
+  git_agent config --global --add safe.directory '/workspace/*' >/dev/null 2>&1 || true
+  echo "robotina: safe.directory acotado a /workspace y /workspace/* (antes: ${current:-vacio})" >&2
+fi
+
+# --- 2. identidad de los commits --------------------------------------------
+set_identity() {
+  key="$1"
+  env_name="$2"
+  value="$(printenv "$env_name" 2>/dev/null || true)"
+  if [ -z "$value" ]; then
+    echo "robotina: AVISO: $env_name no esta definida; $key queda sin tocar" >&2
+    return 0
+  fi
+  current="$(git_agent config --global --get "$key" 2>/dev/null || true)"
+  if [ "$current" = "$value" ]; then
+    echo "robotina: $key ya apunta al valor configurado; sin cambios" >&2
+    return 0
+  fi
+  if git_agent config --global "$key" "$value"; then
+    echo "robotina: $key configurado" >&2
+  else
+    echo "robotina: AVISO: no se pudo configurar $key; se continua" >&2
+  fi
+}
+
+set_identity user.name ROBOTINA_GIT_USER_NAME
+set_identity user.email ROBOTINA_GIT_USER_EMAIL
+
+exit 0

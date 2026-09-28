@@ -187,6 +187,13 @@ services:
       # Sin prompts interactivos de credenciales: falla rapido en lugar de
       # quedarse esperando una respuesta que nunca va a llegar.
       GIT_TERMINAL_PROMPT: "0"
+      # Identidad de los commits del agente (NO son secretos). Las aplica el
+      # cont-init 60-robotina-git; las claves viven en el `.env` del repo para
+      # que el repo declare el MECANISMO y no la identidad de una persona. Si
+      # quedan vacias, el cont-init avisa y deja la identidad como este: la que
+      # ya vive en el config global de git, que esta en el bind y persiste.
+      ROBOTINA_GIT_USER_NAME: ${ROBOTINA_GIT_USER_NAME:-}
+      ROBOTINA_GIT_USER_EMAIL: ${ROBOTINA_GIT_USER_EMAIL:-}
       # Password del servidor de opencode, defensa en profundidad y no frontera:
       # el puerto es loopback-only, asi que ningun par de red lo alcanza. Vacio
       # = servidor sin autenticar. Poniendo el mismo valor en .env, Hermes y el

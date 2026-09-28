@@ -171,3 +171,48 @@ identity half of the egress invariant INV3, specified in `egress-boundary`).
 - THEN it contains `robotina` and contains neither `hermes` nor `opencode` as entries
 - PROOF: `docker compose exec robotina sh -c 'printenv NO_PROXY'` (must contain `robotina`;
   must not contain `hermes` or `opencode`)
+
+### Requirement: ID6 — The commit identity is declared and git's trust scope is measured, not wildcarded
+
+The agent's commits SHALL carry an explicit author, applied at boot from declared keys instead of being
+left to whatever git can synthesize from the environment, and git's ownership exception SHALL be scoped
+to the paths that measurably need it rather than to `*`.
+
+Measured on 2026-09-28 (#50): the container's global git config held exactly one line —
+`safe.directory=*` — and no identity at all. What actually needs the exception is the `/workspace`
+bind: repositories the agent creates itself under `/tmp` (its own uid) do **not** trigger git's
+ownership check, while the project repos under `/workspace` appear owned by `root` through the bind.
+And `/workspace/*` covers repos nested below, because git matches these patterns without
+`FNM_PATHNAME` — measured with a two-level probe, not assumed.
+
+#### Scenario: The commit identity comes from the declared keys
+
+- GIVEN a container whose image carries the boot step, and the optional keys present in `.env`
+- WHEN the agent's global git config is read
+- THEN `user.name` and `user.email` are present
+- PROOF:
+  `docker compose exec -T -u hermes robotina sh -c 'git config --global --get user.name; git config --global --get user.email'`
+  (both must print a non-empty value)
+- NOTE: the keys live in the repository's gitignored `.env`, not in the repository: the repo declares
+the **mechanism**, not a person's identity. Without them the boot step only warns, and the identity
+that already lives in the bind persists.
+
+#### Scenario: The ownership exception is scoped, and still covers what needs it
+
+- GIVEN the change is applied
+- WHEN git runs against the workspace's project repositories
+- THEN the exception list carries no wildcard, and those repositories work anyway
+- PROOF:
+  `docker compose exec -T -u hermes robotina sh -c 'git config --global --get-all safe.directory'`
+  (must print `/workspace` and `/workspace/*`, and must not print `*` on its own) together with
+  `docker compose exec -T -u hermes robotina sh -c 'cd /workspace/<project> && git status --short >/dev/null && echo OK'`
+  (must print `OK`; a `dubious ownership` failure is the regression this requirement guards against)
+
+#### Scenario: The exception is not needed for repositories the agent owns
+
+- GIVEN a repository created by the agent under `/tmp`
+- WHEN git runs there with the same scoped configuration
+- THEN it works with no exception covering it
+- PROOF:
+  `docker compose exec -T -u hermes robotina sh -c 'd=$(mktemp -d /tmp/id6.XXXXXX); cd "$d" && git init -q && git status --short >/dev/null && echo OK; rm -rf "$d"'`
+  (must print `OK`) — this is what makes the wildcard unnecessary rather than merely unwanted
