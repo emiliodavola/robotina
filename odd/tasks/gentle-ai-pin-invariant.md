@@ -3,8 +3,9 @@
 ## Goal
 
 Close #74: `gentle-ai` MUST carry the same two invariants `engram` already carries (AC11), because
-it is the only baked tool that was left without them and it is the one the agent is most likely to
-try to update from inside the container:
+it is the shadow-prone baked tool that was left without them — four of the six `ARG`-pinned tools
+carry none of it (`marksman`, `opencode-ai`, `gh`, `taplo`), and `gentle-ai` is the one the agent is
+most likely to try to update from inside the container:
 
 1. the image **publishes the pin** it baked, and the healthcheck fails when the binary that runs
    reports another version;
@@ -58,9 +59,10 @@ Branch: `fix/issue-74-gentle-ai-pin-invariant`, off `main`. Owner: `emiliodavola
 2. `robotina/healthcheck.sh`: a fourth check — compare the absolute binary's reported version against
    the published pin **and** require `command -v gentle-ai` to resolve to the image's copy. Same
    shape, wording and failure behaviour as the `engram` block; guarded by the variable being set.
-3. `openspec/specs/agent-container/spec.md`: a new requirement (**AC13**) that generalises the
-   published-pin invariant to every tool the image pins, with scenarios and shell-level PROOFs, plus
-   the note that the build is what publishes it.
+3. `openspec/specs/agent-container/spec.md`: a new requirement (**AC13**) that states the exact scope
+   of the published-pin invariant (today: `engram` and `gentle-ai`), names the four `ARG`-pinned tools
+   that are not covered yet, and pins that scope with a fail-able PROOF so the claim cannot drift from
+   the implementation, plus scenarios and shell-level PROOFs for the pass, the mismatch and the shadow.
 4. `README.md` and `README.en.md`: an operator-facing section that states the one supported update
    path for the baked tools (`scripts/bump-tools.sh --write <tool>` + rebuild) and that the in-container
    self-upgrade of `gentle-ai` is **not supported** because `/usr/local/bin` is root-owned and the
@@ -71,13 +73,20 @@ Branch: `fix/issue-74-gentle-ai-pin-invariant`, off `main`. Owner: `emiliodavola
 ## Tasks
 
 - [x] T1 — Branch and this tracker.
-- [ ] T2 — `robotina/Dockerfile`: publish the gentle-ai pin.
-- [ ] T3 — `robotina/healthcheck.sh`: check 4 (version + PATH resolution).
-- [ ] T4 — `openspec/specs/agent-container/spec.md`: AC13 with scenarios and PROOFs.
-- [ ] T5 — `README.md`, `README.en.md` y `AGENTS.md`: the supported update path.
-- [ ] T6 — Static verification: `sh -n` on the healthcheck, `docker compose config -q`, and the two
-      negative probes (pin mismatch, shadowing copy) run against the live container with the
-      stale-image recipe; independent read-only verifier over the diff and the spec assertions.
+- [x] T2 — `robotina/Dockerfile`: publish the gentle-ai pin (`ENV ROBOTINA_GENTLE_AI_VERSION`) after
+      the engram pin, plus the §8 comment naming the healthcheck as the detector.
+- [x] T3 — `robotina/healthcheck.sh`: check 4 (version of the absolute binary + `PATH` resolution),
+      guarded so a pre-change container skips instead of failing falsely; both shadow messages now
+      name any earlier `PATH` entry, not only the HOME.
+- [x] T4 — `openspec/specs/agent-container/spec.md`: AC13 with the exact scope, the four uncovered
+      `ARG`-pinned tools named, and the pass / mismatch / shadow scenarios with PROOFs; `AC11` and
+      `AC12` untouched.
+- [x] T5 — `README.md`, `README.en.md` y `AGENTS.md`: the supported update path, plus the two stale
+      version-table cells and `openspec/project.md`'s base-image line.
+- [x] T6 — Static verification: `sh -n` and `docker compose config -q` in green; independent read-only
+      verifier twice — the first pass found AC13 over-claiming universality and a false sentence, the
+      scope was corrected and the second pass confirmed all three spec PROOFs run verbatim (exit 0 /
+      1 / 1) and that the scope assertion is fail-able in both directions.
 - [ ] T7 — Commit per work unit, push, PR against `main` assigned to the owner.
 
 ## Route declaration
