@@ -620,6 +620,14 @@ A diferencia de `engram`, OpenCode **si** escribe su propio log, en un archivo:
 Es el detalle del server: errores de provider/modelo, `permission=external_directory`, tool calls
 que quedan en `running` y el `ref` de los errores que la HTTP API devuelve como `UnknownError`.
 
+Una lectura fuera del `directory` de la sesion **no falla rapido: se cuelga.** El server evalua
+`permission=external_directory` con `action=ask`; sin un humano que conteste, la tool call no
+termina y el turno ni avanza ni falla. Medido (2026-09-29) con el request pendiente:
+`GET /permission` lo lista con su `sessionID`, mientras que `GET /api/session/{id}/permission`
+devuelve `{"data":[]}` para esa misma sesion. Por eso `opencode-delegate` sondea el primero (v1) y
+**rechaza** el request (`POST /permission/{id}/reply`, `{"reply":"reject"}`) antes de abortar y
+salir `2`: el abort por si solo deja el request listado en el server.
+
 ```bash
 docker compose exec robotina tail -n 200 /opt/data/.local/share/opencode/log/opencode.log
 ```
