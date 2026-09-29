@@ -17,9 +17,12 @@
 #       termina (ausencia = "no esta ocupada", no es un error). OJO: ese mapa es
 #       el de la INSTANCIA del cwd que se consulte, no uno global; ver el bloque
 #       de alcance mas abajo, que es el bug de #40. Mientras el
-#       turno vive miramos `GET /api/session/{id}/permission`: una permission
-#       pendiente es una espera que ningun humano puede contestar, asi que
-#       abortamos y salimos 2 nombrando el bloqueo.
+#       turno vive miramos `GET /permission` (v1) filtrado por `sessionID`: una
+#       permission pendiente es una espera que ningun humano puede contestar,
+#       asi que la rechazamos (el abort NO la limpia), abortamos y salimos 2
+#       nombrando el bloqueo. Medido (2026-09-29): el endpoint v2
+#       `GET /api/session/{id}/permission` devuelve `{"data":[]}` MIENTRAS el
+#       request esta pendiente, por eso NO se usa.
 #
 #       IMPORTANTE: el detector viejo (firma de tokens de `info.tokens`) se
 #       elimino por medido, no por gusto. OpenCode llena esos contadores recien
@@ -145,6 +148,42 @@ api() {
   else
     curl -sS -m "$API_MAX" "$@"
   fi
+}
+
+# Limpieza de permissions pendientes: sonda `GET /permission` (v1) filtrada por
+# `sessionID` y rechaza cada request de ESTA sesion. La usan las DOS salidas que
+# abortan el turno (bloqueo nombrado A1 y timeout global), para no duplicar la
+# logica.
+#
+# Medido (2026-09-29, request pendiente sobre el server vivo):
+#   - `GET /api/session/{id}/permission` (v2) responde `{"data":[]}` aunque el
+#     request este pendiente; la autoridad es v1 `GET /permission`, que lo lista
+#     con `id`, `sessionID`, `permission` y `patterns`.
+#   - el abort de la sesion NO limpia el request: tras dos corridas vencidas
+#     `GET /permission` todavia listaba DOS requests de sesiones muertas.
+#     `POST /permission/{id}/reply` con `{"reply":"reject"}` los limpia
+#     (`GET /permission` -> `[]`), de ahi el reject antes de abortar.
+#
+# Best-effort de punta a punta: endpoint ausente (server viejo), respuesta
+# ilegible o reject fallido NUNCA deben romper un turno sano. Devuelve por stdout
+# el array (JSON) de requests de esta sesion; `[]` si no hay nada o no se pudo
+# leer.
+cleanup_pending_permissions() {
+  raw="$(api -f "$BASE/permission" 2>/dev/null || true)"
+  [ -n "$raw" ] || { printf '[]'; return 0; }
+  sel="$(printf '%s' "$raw" | jq -c --arg s "$SESSION" '[.[]? | select(.sessionID == $s)]' 2>/dev/null || true)"
+  [ -n "$sel" ] || sel='[]'
+  # Un solo `jq -r` para sacar todos los ids; el while recorre la lista. Cada
+  # reject es best-effort y no altera el codigo de salida ni el mensaje.
+  ids="$(printf '%s' "$sel" | jq -r '.[]? | (.id // empty)' 2>/dev/null || true)"
+  if [ -n "$ids" ]; then
+    printf '%s\n' "$ids" | while IFS= read -r perm_id; do
+      [ -n "$perm_id" ] || continue
+      api -X POST -H 'Content-Type: application/json' \
+        -d '{"reply":"reject"}' "$BASE/permission/$perm_id/reply" >/dev/null 2>&1 || true
+    done
+  fi
+  printf '%s' "$sel"
 }
 
 # Texto del ultimo mensaje de rol `user` (dedupe A3). Unimos los parts de texto:
@@ -355,20 +394,25 @@ while :; do
   esac
 
   # Bloqueo nombrado (A1): mientras el turno vive, una permission pendiente es
-  # una espera que ningun humano va a contestar. Abortamos y salimos 2 diciendo
-  # cual. La sonda es best-effort: el endpoint puede no existir (server viejo) o
-  # devolver algo ilegible, y eso NUNCA debe romper el turno.
+  # una espera que ningun humano va a contestar. La autoridad es `GET /permission`
+  # (v1) filtrado por `sessionID`; el v2 `GET /api/session/{id}/permission` se
+  # descarto POR MEDIDO (devuelve `{"data":[]}` con el request pendiente). Al
+  # detectar, `cleanup_pending_permissions` ya rechazo el request (el abort no lo
+  # limpia), abortamos y salimos 2 diciendo cual. Tanto la sonda como el cleanup
+  # son best-effort: endpoint ausente o respuesta ilegible NUNCA deben romper el
+  # turno.
   if [ "$turn_alive" = 1 ]; then
-    perms=""
-    if perms="$(api -f "$BASE/api/session/$SESSION/permission" 2>/dev/null)"; then :; else perms=""; fi
-    if [ -n "$perms" ] && printf '%s' "$perms" | jq -e '(.data // []) | length > 0' >/dev/null 2>&1; then
+    pending=""
+    if pending="$(cleanup_pending_permissions)"; then :; else pending=""; fi
+    if [ -n "$pending" ] && printf '%s' "$pending" | jq -e 'length > 0' >/dev/null 2>&1; then
       api -X POST "$BASE/session/$SESSION/abort" >/dev/null 2>&1 || true
       echo "opencode-delegate: el turno quedo bloqueado esperando una permission que ningun humano puede contestar (session: $SESSION); turno abortado" >&2
-      # Detalle shape-proof: si `resources` viniera con una forma que `join` no
-      # acepta, un jq que falla mataria el script por `set -e` antes del exit 2 y
-      # el caller veria un codigo equivocado en vez del bloqueo nombrado. Por eso
-      # `tostring` + `[]?` + `|| true`.
-      printf '%s' "$perms" | jq -r '(.data // [])[]? | "  - " + ((.action // "?") | tostring) + " " + ((.resources // []) | tostring)' >&2 || true
+      # Detalle shape-proof (v1): el request trae `permission` y `patterns`. Si
+      # vinieran con una forma que `tostring` no acepta, un jq que falla
+      # mataria el script por `set -e` antes del exit 2 y el caller veria un
+      # codigo equivocado en vez del bloqueo nombrado. Por eso `tostring` + `[]?`
+      # + `|| true`.
+      printf '%s' "$pending" | jq -r '.[]? | "  - " + ((.permission // "?") | tostring) + " " + ((.patterns // []) | tostring)' >&2 || true
       exit 2
     fi
   fi
@@ -455,9 +499,13 @@ while :; do
     fi
   fi
 
-  # Timeout global: se agoto el presupuesto sin que el turno cierre. Se informa
-  # el ultimo status observado antes de abortar, como diagnostico extra.
+  # Timeout global: se agoto el presupuesto sin que el turno cierre. Antes de
+  # abortar se corre el MISMO cleanup de permissions pendientes que la salida de
+  # bloqueo nombrado: el abort no limpia el request (medido), asi que sin esto el
+  # helper deja requests listados en el server. El cleanup es best-effort y un
+  # fallo suyo NO cambia el exit 4.
   if [ "$(($(date +%s) - start_epoch))" -ge "$TIMEOUT" ]; then
+    cleanup_pending_permissions >/dev/null 2>&1 || true
     echo "opencode-delegate: timeout global de ${TIMEOUT}s en la session $SESSION (ultimo status: $status_type, alcance: ${SESSION_DIR:-desconocido}); turno abortado" >&2
     api -X POST "$BASE/session/$SESSION/abort" >/dev/null 2>&1 || true
     exit 4
