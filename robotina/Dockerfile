@@ -74,6 +74,15 @@ ARG TAPLO_SHA256=8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb615
 # 2.1.0 corriendo sobre un pin de 1.20.0, ver #42).
 ENV ROBOTINA_ENGRAM_VERSION=${ENGRAM_VERSION}
 
+# El pin de gentle-ai se publica igual, para que el healthcheck compare lo que
+# CORRE contra lo que esta imagen fijo. Ademas, /usr/local/bin es root:root y
+# los servicios corren como `hermes` (uid 10000), asi que la auto-actualizacion
+# dentro del contenedor NUNCA puede funcionar: el updater prepara un temporal al
+# lado del binario para renombrarlo de forma atomica y muere con EACCES sobre
+# ese temporal. La unica actualizacion soportada es subir el ARG y reconstruir
+# (ver #74).
+ENV ROBOTINA_GENTLE_AI_VERSION=${GENTLE_AI_VERSION}
+
 # pipefail: las verificaciones de checksum usan `grep ... | sha256sum -c -`.
 # Sin esto, un grep que no matchea no corta el build y la verificacion podria
 # pasar con entrada vacia. dash (el /bin/sh de Debian) no tiene pipefail.
@@ -246,7 +255,9 @@ RUN set -eux; \
 # --- 8. gentle-ai (el instalador, no una copia de sus archivos) --------------
 # Los artefactos de gentle-ai NO se copian a mano: los genera su propio
 # instalador en un staging durante el build, y el oneshot opencode-init los
-# aplica al arrancar. Actualizar gentle-ai = subir la version y reconstruir.
+# aplica al arrancar. Actualizar gentle-ai = subir la version y reconstruir;
+# el healthcheck es el detector: falla si lo que corre no es la version que la
+# imagen fijo, o si una copia en el HOME ensombrece el binario.
 RUN set -eux; \
     f="gentle-ai_${GENTLE_AI_VERSION}_linux_amd64.tar.gz"; \
     base="https://github.com/Gentleman-Programming/gentle-ai/releases/download/v${GENTLE_AI_VERSION}"; \

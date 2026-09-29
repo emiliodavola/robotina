@@ -374,13 +374,13 @@ Measured inside the running containers, not copied from documentation.
 | --- | --- | --- |
 | opencode | 1.18.32 | glibc x64 asset, exact version pinned in `robotina/Dockerfile` |
 | Squid | 6.13 | `ubuntu/squid:latest` |
-| Hermes | — | `nousresearch/hermes-agent:latest` |
+| Hermes | — | `nousresearch/hermes-agent:v2026.9.24@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7` |
 | git / gh | 2.47.3 / 2.97.0 | vendor base / pinned release |
 | Go / uv / jq / ripgrep | 1.24.4 / 0.11.6 / 1.7 / 14.1.1 | vendor base / uv installer / `apk` |
 | Python | 3.13.5 | Hermes venv interpreter |
 | Node | v26.5.1 | vendor base |
 | R | 4.5.0 | vendor base |
-| engram | 1.20.0 | release, checksum-verified |
+| engram | 2.2.1 | release, checksum-verified |
 | gentle-ai | 3.1.0 | release, checksum-verified |
 | taplo / marksman / codegraph | 0.10.0 / 2026-02-08 / 1.5.0 | releases pinned by tag |
 
@@ -391,6 +391,34 @@ integrity check. Everything else resolves at build time (`latest` tags and
 unpinned `apk`), so **these versions describe the image that was measured, not a
 forward guarantee**: to audit a specific version, measure it again inside the
 container.
+
+### Updating the baked tools
+
+The only supported path for every tool the Dockerfile pins through an `ARG`
+(engram, gentle-ai, marksman, gh, taplo and opencode-ai) is to rewrite the pin and
+rebuild:
+
+```sh
+scripts/bump-tools.sh --check          # what pin is behind
+scripts/bump-tools.sh --write <tool>   # rewrite that tool's ARG
+docker compose build robotina          # rebuild with the new pin
+```
+
+Dependabot cannot see these pins: its parser resolves `FROM` and `image:` tags,
+not `ARG` values (that is why `scripts/bump-tools.sh` exists, see #52). Without a
+rebuild, the version that runs is still the baked one.
+
+For **gentle-ai** there is an extra hard rule: the **in-container self-upgrade is
+NOT supported**. `/usr/local/bin` is `root:root` and the services run as `hermes`
+(uid 10000), so `gentle-ai`'s updater —which stages a temp file beside the
+binary for an atomic rename— dies with an opaque `EACCES` on that temp file. The
+correct path is to bump the `ARG` and rebuild, not to update from inside.
+
+The healthcheck compares the version that **runs** against the pin the image
+published, and fails when a copy in the agent's HOME (`/opt/data/.local/bin`,
+which precedes `/usr/local/bin` on the `PATH`) shadows the baked binary. That
+check covers `engram` and `gentle-ai` today, the two tools that publish a pin;
+`marksman`, `opencode-ai`, `gh` and `taplo` do not carry it yet.
 
 ## Security model in five lines
 
