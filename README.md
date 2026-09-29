@@ -362,13 +362,13 @@ Medido dentro de los contenedores que corren, no copiado de la documentación.
 | --- | --- | --- |
 | opencode | 1.18.32 | asset glibc x64, versión exacta pineada en `robotina/Dockerfile` |
 | Squid | 6.13 | `ubuntu/squid:latest` |
-| Hermes | — | `nousresearch/hermes-agent:latest` |
+| Hermes | — | `nousresearch/hermes-agent:v2026.9.24@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7` |
 | git / gh | 2.47.3 / 2.97.0 | base vendor / release pineada |
 | Go / uv / jq / ripgrep | 1.24.4 / 0.11.6 / 1.7 / 14.1.1 | base vendor / instalador de uv / `apk` |
 | Python | 3.13.5 | intérprete del venv de Hermes |
 | Node | v26.5.1 | base vendor |
 | R | 4.5.0 | base vendor |
-| engram | 1.20.0 | release, con checksum |
+| engram | 2.2.1 | release, con checksum |
 | gentle-ai | 3.1.0 | release, con checksum |
 | taplo / marksman / codegraph | 0.10.0 / 2026-02-08 / 1.5.0 | releases pineadas por tag |
 
@@ -379,6 +379,35 @@ integridad. Lo demás se resuelve al construir (tags `latest` y `apk` sin
 versión), así que **estas versiones describen la imagen medida, no una garantía
 a futuro**: para auditar una versión concreta hay que volver a medirla en el
 contenedor.
+
+### Actualizar las herramientas horneadas
+
+La única vía soportada para toda herramienta que el Dockerfile fija con un `ARG`
+(engram, gentle-ai, marksman, gh, taplo y opencode-ai) es reescribir el pin y
+reconstruir:
+
+```sh
+scripts/bump-tools.sh --check          # qué pin quedó atrás
+scripts/bump-tools.sh --write <tool>   # reescribe el ARG de esa herramienta
+docker compose build robotina          # reconstruir con el pin nuevo
+```
+
+Dependabot no ve estos pines: su parser resuelve tags de `FROM` e `image:`, no
+valores de `ARG` (por eso existe `scripts/bump-tools.sh`, ver #52). Sin rebuild,
+la versión que corre sigue siendo la horneada.
+
+Para **gentle-ai** hay además una regla dura: la **auto-actualización dentro del
+contenedor NO está soportada**. `/usr/local/bin` es `root:root` y los servicios
+corren como `hermes` (uid 10000), así que el updater de `gentle-ai` —que prepara
+un temporal al lado del binario para renombrarlo de forma atómica— muere con un
+`EACCES` opaco sobre ese temporal. La vía correcta es subir el `ARG` y
+reconstruir, no actualizar desde adentro.
+
+El healthcheck compara la versión que **corre** contra el pin que la imagen
+publicó, y falla si una copia en el HOME del agente (`/opt/data/.local/bin`, que
+precede a `/usr/local/bin` en el `PATH`) ensombrece el binario horneado. Ese
+chequeo cubre hoy a `engram` y `gentle-ai`, las dos herramientas que publican pin;
+`marksman`, `opencode-ai`, `gh` y `taplo` todavía no lo tienen.
 
 ## Modelo de seguridad, en cinco líneas
 

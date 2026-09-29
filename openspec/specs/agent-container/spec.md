@@ -500,3 +500,83 @@ and had it existed it would have lived in the container layer: gone on every rec
 - PROOF: `grep -cE '^RUN .*uv tool install' robotina/Dockerfile` (must be 0; the pattern names the
   **code**, not the prose — the header comment mentions `uv tool install` on purpose, and a proof that
   matches comments is not a proof)
+
+### Requirement: AC13 — The shadow-prone pinned tools publish their pin and resolve from the image
+
+AC11 established the published-pin invariant for `engram`. Today that invariant covers exactly **two**
+tools: `engram` and `gentle-ai`. The agent can place a copy of either in its own HOME, in
+`/opt/data/.local/bin` — the directory the stack's `PATH` puts **before** `/usr/local/bin`, so a copy
+there shadows the baked binary unnoticed. For each of
+those two the image SHALL publish the pin it baked (`ENV ROBOTINA_<TOOL>_VERSION=${<TOOL>_VERSION}`,
+sourced from the same `ARG`) and the container healthcheck SHALL compare the version the absolute
+binary reports against the published pin **and** require `command -v <tool>` to resolve to the image's
+own copy in `/usr/local/bin`. The build publishes the pin; the healthcheck detects drift.
+
+The scope is deliberately bounded, not universal. The Dockerfile pins **six** tools through an `ARG`
+(`ENGRAM_VERSION`, `GENTLE_AI_VERSION`, `MARKSMAN_RELEASE`, `OPENCODE_VERSION`, `GH_VERSION`,
+`TAPLO_VERSION`), but only `engram` and `gentle-ai` publish a `ROBOTINA_*_VERSION` pin and are checked
+by the healthcheck. The other four (`marksman`, `opencode-ai`, `gh`, `taplo`) are **not** covered yet;
+extending the invariant to them is a follow-up, not part of this change. This requirement SHALL NOT be
+read as a general obligation the repository already meets.
+
+Measured origin (#74): `gentle-ai` was the **shadow-prone** tool left without the invariant — `engram`
+already carried it (AC11), and the remaining four are not covered at all.
+`ROBOTINA_GENTLE_AI_VERSION` was **unset** in the running container while `ARG GENTLE_AI_VERSION=3.1.0`
+was baked; `/usr/local/bin` is `root:root` mode 755 and the s6 services run as `hermes` (uid 10000),
+so `gentle-ai`'s in-container self-upgrade can never succeed — it stages `<binary>.new` beside the
+destination for an atomic rename and dies with `EACCES` on the temp file. The correct update path
+(`scripts/bump-tools.sh --write <tool>` + rebuild) appeared in **0** mentions across `README.md`,
+`README.en.md` and `SECURITY.md`, and the repository had **no `AGENTS.md`** for the agent to read.
+Upstream's opaque `EACCES` is out of scope here: this stack owns making the failure unnecessary and
+loud, not patching the updater.
+
+#### Scenario: The published-pin scope is exactly engram and gentle-ai today
+
+- GIVEN the change is applied
+- WHEN the Dockerfile's pins are counted
+- THEN exactly two `ENV ROBOTINA_*_VERSION` lines exist (`engram` and `gentle-ai`), while all six
+  ARG-pinned tools are present — adding a third pin or dropping one of the two FAILS this proof, so
+  the requirement's claim cannot silently drift from the implementation
+- PROOF:
+  `grep -cE '^ENV ROBOTINA_[A-Z_]+_VERSION=' robotina/Dockerfile` (must be exactly 2) together with
+  `grep -nE '^ENV ROBOTINA_(ENGRAM|GENTLE_AI)_VERSION=' robotina/Dockerfile` (must list exactly the
+  `ROBOTINA_ENGRAM_VERSION` and `ROBOTINA_GENTLE_AI_VERSION` lines) and
+  `grep -nE '^ARG (ENGRAM_VERSION|GENTLE_AI_VERSION|MARKSMAN_RELEASE|OPENCODE_VERSION|GH_VERSION|TAPLO_VERSION)=' robotina/Dockerfile`
+  (must list all six ARG-pinned tools; the four without a matching `ENV` are the uncovered follow-up)
+
+#### Scenario: The healthcheck passes when the pin matches
+
+- GIVEN a container whose `/usr/local/bin/gentle-ai` reports the pinned version
+- WHEN the repository's healthcheck runs with the pin matching
+- THEN all four checks pass and the command exits 0
+- PROOF:
+  `a="$(sed -n 's/^ARG GENTLE_AI_VERSION=//p' robotina/Dockerfile)"; docker compose exec -T -e ROBOTINA_GENTLE_AI_VERSION="$a" robotina sh -s < robotina/healthcheck.sh`
+  (exit 0; the pin is read from the Dockerfile, so the proof survives a version bump)
+- NOTE: this is the stale-image recipe used elsewhere in this file: the run reads the **repository's**
+  copy of the healthcheck through `sh -s`, so the proof stays valid against the running image until the
+  next rebuild bakes the check in. The `[ -n "${ROBOTINA_GENTLE_AI_VERSION:-}" ]` guard is what makes a
+  pre-change container — one that does not publish the variable — skip the fourth check instead of
+  failing falsely.
+
+#### Scenario: The healthcheck fails on a pin mismatch
+
+- GIVEN the running binary reports its baked version
+- WHEN the repository's healthcheck runs against a pin that does not match
+- THEN it exits non-zero and names both versions on stderr
+- PROOF:
+  `docker compose exec -T -e ROBOTINA_GENTLE_AI_VERSION=9.9.9 robotina sh -s < robotina/healthcheck.sh`
+  (exit 1; stderr names `9.9.9` and the running baked version)
+- NOTE: `9.9.9` is deliberately **not** a real version; it is a literal chosen only to fail the
+  comparison, and it is the one hardcoded value these proofs keep on purpose.
+
+#### Scenario: The healthcheck fails when a copy shadows the baked binary
+
+- GIVEN a fake `gentle-ai` executable under `/tmp/ga-shadow`, placed ahead of `/usr/local/bin` on the `PATH`
+- WHEN the repository's healthcheck runs with the pin matching
+- THEN it exits non-zero and names the resolved path on stderr
+- PROOF:
+  `a="$(sed -n 's/^ARG GENTLE_AI_VERSION=//p' robotina/Dockerfile)"; docker compose exec -T -e ROBOTINA_GENTLE_AI_VERSION="$a" robotina sh -c 'mkdir -p /tmp/ga-shadow && printf "#!/bin/sh\necho shadow\n" > /tmp/ga-shadow/gentle-ai && chmod 0755 /tmp/ga-shadow/gentle-ai; PATH=/tmp/ga-shadow:$PATH sh -s; rc=$?; rm -rf /tmp/ga-shadow; exit $rc' < robotina/healthcheck.sh`
+  (exit 1; stderr names `/tmp/ga-shadow/gentle-ai`)
+- NOTE: the fixture is created and removed inside the same command, so no shadowing copy survives the
+  proof, and the absolute-path version check still passes — it is the `PATH` assertion that catches the
+  shadow, exactly as in AC11.

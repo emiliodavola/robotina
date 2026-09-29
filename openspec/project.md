@@ -15,7 +15,7 @@ not "nothing happens" but **bounded blast radius**.
 | Domain | Tool |
 | --- | --- |
 | Orchestration | Docker Compose v2 (`compose.yml`) |
-| Images | Vendor base `nousresearch/hermes-agent:latest` + one custom Dockerfile (`robotina/Dockerfile`) |
+| Images | Vendor base `nousresearch/hermes-agent:v2026.9.24@sha256:fca358f1…` (dated tag + digest, pinned in the Dockerfile) + one custom Dockerfile (`robotina/Dockerfile`) |
 | Host verified with | Docker 29.8.0, Docker Compose v5.5.1 (Windows + Docker Desktop) |
 | Test runner | **none** — no unit-test framework exists in this repository |
 | Linter / formatter / type checker | none configured |
