@@ -71,13 +71,20 @@ Branch: `fix/issue-73-delegate-permission-probe`, off `main`. Owner: `emiliodavo
 ## Tasks
 
 - [x] T1 — Branch and this tracker.
-- [ ] T2 — `robotina/bin/opencode-delegate`: A1 probe against `GET /permission` + reject-before-abort,
-      on both the named-block path and the timeout path.
-- [ ] T3 — `openspec/specs/opencode-delegation/spec.md`: OD8 rewritten with the measured endpoint and
-      the cleanup, plus the live non-hang PROOF.
-- [ ] T4 — `SECURITY.md`: the measured answer for out-of-directory reads.
-- [ ] T5 — Verification: live reproduction (the same external-directory read) must exit `2` quickly
-      and leave `GET /permission` empty; independent read-only verifier over the diff and the spec.
+- [x] T2 — `robotina/bin/opencode-delegate`: `cleanup_pending_permissions` probes `GET /permission`
+      (v1) filtered by `sessionID`, rejects each matching request, and is used by both abort paths
+      (named block → `2`, global timeout → `4`), so the helper stops leaving requests listed.
+- [x] T3 — `openspec/specs/opencode-delegation/spec.md`: OD8 rewritten (v1 authority, reject before
+      abort, best-effort, cleanup on the timeout path) with the live proof asserting exit `2` and an
+      empty `GET /permission`; `OD1`–`OD7`, `OD9`–`OD11` untouched. `hermes/skills/opencode-delegation/SKILL.md`
+      aligned (the table row for v2 is now marked as not the block probe), and the historical tracker
+      `odd/tasks/opencode-delegate-agent-liveness.md` carries a SUPERSEDED note instead of a rewrite.
+- [x] T4 — `SECURITY.md`: the measured answer for out-of-directory reads (it hangs) and the v1/v2
+      asymmetry.
+- [x] T5 — Verification: live differential by the parent (old baked helper: exit `4` at 46 s with a
+      request left behind; new copy: exit `2` at 5 s, `GET /permission` → `[]`) and an independent
+      read-only verifier over the code, the spec and the docs (no blocker/important findings; one
+      stale sentence in a historical tracker, corrected here).
 - [ ] T6 — Commit per work unit, push, PR against `main` assigned to the owner.
 
 ## Route declaration
