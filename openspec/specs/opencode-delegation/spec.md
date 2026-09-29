@@ -26,6 +26,14 @@ Issue #69 added the fourth: **the turn's time budget must fit a multi-phase task
 must be configurable.** Three delegated turns that combined a survey, an edit, a network step
 (`uv sync`) and a git/GitHub push were aborted by the previous 900 s default.
 
+Issue #73 added the fifth: **the named-block detector must probe the endpoint that actually carries
+the fact, and clean up what it aborts.** Measured on 2026-09-29 against a live hanging request: the
+endpoint the helper polled, `GET /api/session/{id}/permission` (v2), returned `{"data":[]}` on 6 of
+6 polls over 60 s while `GET /permission` (v1) listed the request with its `sessionID`. So the
+detector was a no-op and an `external_directory: ask` delegation burned the whole budget to exit
+`4` instead of exiting `2` naming the block. The abort also left the request listed on the server;
+a v1 reject clears it.
+
 Artifact language: English.
 
 ## Verification model
@@ -332,26 +340,50 @@ right after it, so reading that value as a closure aborts a turn that is still w
   (must print a list whose first element is `"tool-calls"` and whose last element is `"stop"`,
   while the delegation itself exited `0`)
 
-### Requirement: OD8 — A named block is reported instead of guessed
+### Requirement: OD8 — A named block is reported and cleaned instead of guessed
 
 While the turn is alive, `opencode-delegate` SHALL probe the session's pending permission requests
-(`GET /api/session/{id}/permission`); a non-empty result SHALL abort the session and exit `2`,
-naming the block on stderr. The probe SHALL be best-effort: an unavailable or unparsable response
-SHALL NOT fail the turn.
+via `GET /permission` (v1) filtered by `sessionID`, and SHALL NOT rely on
+`GET /api/session/{id}/permission` (v2), which was measured returning `{"data":[]}` while the
+request was pending. A non-empty result SHALL reject the pending request(s) with
+`POST /permission/{id}/reply` and body `{"reply":"reject"}`, then abort the session and exit `2`,
+naming the block on stderr. The probe and the cleanup SHALL be best-effort: an unavailable,
+unparsable or failed response SHALL NOT fail the turn nor change the exit code. The same cleanup
+SHALL run on the global-timeout path before it aborts, so the helper stops leaving requests listed
+on the server.
 
-#### Scenario: The helper probes the pending-permission endpoint
+Measured origin (2026-09-29, request pending on the live server, read with
+`curl -u "opencode:$OPENCODE_SERVER_PASSWORD"`): `GET /api/session/{id}/permission` returned
+`{"data":[]}` on 6 of 6 polls over 60 s, while `GET /permission` listed the request as
+`{"id":"per_…","sessionID":"ses_…","permission":"external_directory","patterns":["/opt/data/cache/delegation/*"],…}`.
+The consequence was a hang: a delegation created with `--directory /workspace` and told to read
+`/opt/data/cache/delegation/subagent-summary-0-*.txt` ended on
+`timeout global de 90s … (ultimo status: busy, alcance: /workspace)` with exit `4`. The abort does
+not clear the request either: after two timed-out runs `GET /permission` still listed **two**
+requests from dead sessions, and `POST /permission/{id}/reply` with `{"reply":"reject"}` cleared
+them (`GET /permission` → `[]`).
+
+#### Scenario: The helper probes the v1 endpoint, not the empty v2 one
 
 - GIVEN the change is applied
 - WHEN the helper's source is searched
-- THEN the pending-permission endpoint is present
-- PROOF: `grep -c '/permission' robotina/bin/opencode-delegate` (must be ≥ 1; 0 is a FAILURE)
+- THEN the v1 pending-permission endpoint is called and no v2 call site remains
+- PROOF: `grep -c '\$BASE/permission' robotina/bin/opencode-delegate` (must be ≥ 1) together with
+  `grep -c 'api/session/\$SESSION/permission' robotina/bin/opencode-delegate || true` (must print `0`; a
+  v2 call site is the defect this requirement removes — the `|| true` is there because `grep -c`
+  exits `1` when it prints `0`, and a `set -e` wrapper around this line would abort on a passing
+  assertion)
+- NOTE: the assertions name the **code**, not the prose. A comment that documents the v2 dead end is
+  not a violation; a call site is. `grep -c '/permission'` alone would be vacuous, because both the
+  v1 and the v2 call sites match it.
 
 #### Scenario: A pending permission aborts with exit 2 and names the block (conditional)
 
 - GIVEN a delegation whose tool call reaches a permission rule set to `ask` in
   `robotina/overlay.json` (`bash: git commit *`) and no human to answer it
 - WHEN the helper polls
-- THEN it aborts the session and exits `2`, with the pending permission on stderr
+- THEN it rejects the request, aborts the session, and exits `2`, with the pending permission on
+  stderr
 - PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina /opt/robotina/bin/opencode-delegate --timeout 120 "Run exactly this shell command: git commit --allow-empty -m probe. Then reply with exactly DONE"`
   (must exit `2` and print the pending permission on stderr)
 - NOTE: this scenario needs the fixture to actually reach the `ask` rule. A model that rewrites the
@@ -359,6 +391,44 @@ SHALL NOT fail the turn.
   the rule) leaves nothing pending and the run then ends on the global timeout. If no permission ask
   can be produced in the run, the scenario is skipped as **inconclusive**, never reported as
   passing.
+
+#### Scenario: The detector fires instead of hanging
+
+- GIVEN a fixture file that an agent's tool call can only reach through the `external_directory`
+  `ask` rule, written under the agent's own cache root `/opt/data/cache/delegation/` (the path family
+  measured to reach `ask`)
+- WHEN the delegation is told to read it and no human answers
+- THEN the helper exits `2` **well before** the budget, with the named-block sentence on stderr
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -c 'HOME=/opt/data; printf "linea\n" > /opt/data/cache/delegation/probe-permission-$$.txt; opencode-delegate --agent build --directory /workspace --timeout 120 "Read the file /opt/data/cache/delegation/probe-permission-$$.txt with the read tool and reply with its first line. If the read fails, reply exactly READ-FAILED."; rc=$?; rm -f /opt/data/cache/delegation/probe-permission-$$.txt; exit $rc'`
+  (must exit `2`, with stderr carrying
+  `el turno quedo bloqueado esperando una permission que ningun humano puede contestar`; an exit `4`,
+  or any completion, is the exact FAILURE this requirement prevents)
+- NOTE: the helper is baked into the image, so a run against a stale image exercises the old code.
+  Until the rebuild + `--force-recreate`, exercise the checked-out file with the verification model's
+  `sh -s` form, wrapping the fixture create/remove around it in the same in-container shell (the
+  outer `sh -c` gets its script as an argument, so its stdin is free for the piped helper):
+  `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -c 'HOME=/opt/data; printf "linea\n" > /opt/data/cache/delegation/probe-permission-$$.txt; sh -s -- --agent build --directory /workspace --timeout 120 "Read the file /opt/data/cache/delegation/probe-permission-$$.txt with the read tool and reply with its first line. If the read fails, reply exactly READ-FAILED."; rc=$?; rm -f /opt/data/cache/delegation/probe-permission-$$.txt; exit $rc' < robotina/bin/opencode-delegate`
+  (must exit `2` with the same named-block sentence; an exit `4`, or any completion, is a FAILURE).
+
+#### Scenario: No request is left dangling after the block
+
+- GIVEN the detector fired, as in the proof above
+- WHEN the server's pending-permission list is read
+- THEN it lists nothing for that session
+- PROOF: `docker compose exec -T robotina sh -c 'set --; [ -n "${OPENCODE_SERVER_PASSWORD:-}" ] && set -- -u "opencode:$OPENCODE_SERVER_PASSWORD"; curl -fsS "$@" -m 5 http://127.0.0.1:4096/permission'`
+  (must print `[]`; a listed request from the just-aborted session is a FAILURE)
+
+#### Scenario: The probe is best-effort and never fails a healthy turn
+
+- GIVEN a delegation whose turn never reaches a permission rule, so nothing is pending
+- WHEN the helper polls the pending-permission endpoint
+- THEN the turn closes normally and the helper exits `0`
+- PROOF: the OD6 30 s delegation (exit `0`, prints `DONE`) — its turn reaches no `ask` rule, so the
+  `GET /permission` probe returns no request for its session, yet the run still ends `0`
+- NOTE: the same guard covers an unavailable endpoint. The probe captures the response with
+  `2>/dev/null || true` and only acts on a successful `jq -e`, so a server without `/permission` (or
+  an unparsable body) leaves the turn running to its normal close; a failed reject never changes the
+  exit code either, on both the `2` and the `4` paths.
 
 ### Requirement: OD9 — `--directory` is opt-in and never derived from the caller's cwd
 

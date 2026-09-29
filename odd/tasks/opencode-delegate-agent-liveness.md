@@ -80,6 +80,11 @@ Two independent defects in one helper. Neither is "the orchestrator coordinates"
   `GET /api/session/{id}/permission` means the turn is waiting on a permission prompt no
   human can answer: abort, exit 2, and name it. That probe is best-effort — an
   unavailable endpoint (older server) must never fail the turn.
+  **SUPERSEDED (2026-09-29, #73):** measured on the live server, `GET /api/session/{id}/permission`
+  (v2) returns `{"data":[]}` **while** the request is pending, so this probe was a no-op and the
+  stall ran to the global timeout. The authority is `GET /permission` (v1) filtered by `sessionID`,
+  and the request is rejected before the abort because the abort does not clear it. See OD8 in
+  `openspec/specs/opencode-delegation/spec.md`.
 - `--stall-polls` stays accepted for compatibility and is **deprecated**: it warns to
   stderr and no longer affects behaviour.
 - Exit codes keep their meaning: `0` finished, `2` blocked (aborted), `3` turn error or

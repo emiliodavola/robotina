@@ -60,8 +60,10 @@ It implements the whole contract so you do not have to:
   instance** (`?directory=<the session's directory>`): `busy`/`retry` = alive, and the session
   leaving *that* map = the turn is over — never token counts, and never an unscoped map, which only
   answers for the server's own cwd and is silent about a session created elsewhere;
-- probes `GET /api/session/{id}/permission` while the turn is alive: a pending permission is a
-  named block — it aborts the session and reports it — instead of inventing a result;
+- probes `GET /permission` while the turn is alive, filtered by the session's `sessionID`: a pending
+  permission is a named block — the helper rejects it (`POST /permission/{id}/reply` with
+  `{"reply":"reject"}`) before aborting, because the abort alone does not clear it — instead of
+  inventing a result;
 - **refuses to resubmit** an identical prompt already present in the session;
 - accepts `--directory PATH` to opt a new session into a cwd other than the server's own
   (`/workspace`; it is never derived from `$PWD`);
@@ -160,7 +162,8 @@ Full OpenAPI spec: `GET http://127.0.0.1:4096/doc`. Liveness: `GET /global/healt
 | GET | `/session/{id}/diff` | Working-tree diff of what it changed |
 | GET | `/session/{id}/todo` | Task list it is tracking |
 | GET | `/session/status[?directory=PATH]` | Liveness of **the instance of that cwd** (the server's own cwd when omitted): `busy`/`retry` = alive, absent = that instance has nothing running. It is **not a global map**: a session created in another directory is absent from the unscoped answer *while it runs*, so never read absence as closure without passing that session's own directory. `?workspace=` returns `500`. |
-| GET | `/api/session/{id}/permission` | Pending permission requests of a session (`{"data":[...]}`; `[]` = none) |
+| GET | `/permission` | Pending permission requests for the whole server: a list of requests, each with `id`, `sessionID`, `permission` and `patterns`. **Filter by `sessionID`** to scope it to a session. This is the authority the helper reads. |
+| GET | `/api/session/{id}/permission` | ⚠️ **Not the block probe.** Measured returning `{"data":[]}` while a request for that same session was pending, so its `[]` does **not** mean "no pending permission" on this server version. Use `GET /permission` above. |
 | POST | `/session/{id}/abort` | Stop it |
 | GET | `/agent` | Agents it exposes (and their descriptions) |
 | GET | `/config/providers` | Providers and models actually available |
