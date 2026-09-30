@@ -14,14 +14,23 @@ Four axes (the fourth one is an owner-requested extension of the same branch, no
 2. **Credential**: `ROBOTINA_HF_TOKEN` in `.env.example`, published to the container as `HF_TOKEN`
    (the name `huggingface_hub` reads), same prefix and default-empty criteria as the rest.
 3. **Egress + documentation**: `.huggingface.co` and `.hf.co` in `squid/allowlist.txt` (the second
-   covers the download redirects to `cas-bridge.xethub.hf.co`), and the gated-repo caveat (the
-   licence has to be accepted on huggingface.co with the token's account) written down.
+   covers the download redirect, measured as `us.aws.cdn.hf.co` in #87), and the gated-repo caveat
+   — kept as *capability* support, since the repo turned out not to be gated (see the banner above)
+   — written down.
 4. **Extension, owner-requested in the same branch**: the Google AI Studio surface in the allowlist,
    and the AI Studio API key as a fourth credential (`ROBOTINA_GEMINI_API_KEY` ->
    `GEMINI_API_KEY`). #85 leaves the allowlist out of its scope on purpose ("se hace aparte
    editando `squid/allowlist.txt`"), so this axis is that "aparte" plus its credential.
 
 Branch: `feat/issue-85-hf-cli-and-token`, off `main`. Owner: `emiliodavola`. Closes #85.
+
+> **Corregido por #87 (2026-09-30).** La premisa de este issue — que el repo
+> `google/gemma-4-31B-it-qat-w4a16-ct` esta **gated** — se midio **falsa**: la API responde
+> `"gated": false` y `"private": false` a un pedido anonimo, y una lectura anonima de un byte de
+> `model.safetensors` devuelve `206` desde `us.aws.cdn.hf.co`. #87 corrigio las docs, el contrato
+> (CR11) y el comentario de `compose.yml`, y reemplazo la sonda `--dry-run` (que sale `0` con y sin
+> token: no puede fallar) por una lectura con `-f` que si puede. Donde este tracker todavia diga
+> "gated" o `cas-bridge.xethub.hf.co`, vale lo medido en #87.
 
 ## Non-goals
 
@@ -189,15 +198,17 @@ recreated container, or the owner's hand edit.
 
 ## Pending after this PR
 
-- **The running stack keeps the old image** until a rebuild plus `--force-recreate robotina`, and the
-  egress-proxy keeps the old allowlist until `docker compose up -d --force-recreate egress-proxy`.
-  The end-to-end probe (`hf download google/gemma-4-31B-it-qat-w4a16-ct --dry-run`) needs both, plus
-  a token whose account has accepted the licence.
-- **T4-bis**: the two lines in `.env.example`.
+- **CLOSED (2026-09-30)**: the image was rebuilt and the stack recreated, and the live container
+  reports `hf --version` -> `2.0.0` resolved from `/usr/local/bin/hf`. The egress-proxy was also
+  recreated for the #87 allowlist change. What remains for the access probe is only a token with the
+  read scope; no licence acceptance exists to perform while the API reports `"gated": false` (#87).
+- **T4-bis**: CLOSED by the owner (commit `00b4c53`): `.env.example` carries `ROBOTINA_HF_TOKEN` and
+  `ROBOTINA_GEMINI_API_KEY`.
 - Extending the healthcheck shadow check to `hf` (the option-B alternative recorded in the
   non-goals).
 - Repairing CR4's over-broad repo-wide recipe (Diagnosis 12).
-- The licence acceptance itself is a human step on huggingface.co, not something this repo can do.
+- The probe that proves access needs the rebuilt image, the recreated stack and a token with the
+  read scope. No licence acceptance exists to perform while the API reports `"gated": false` (#87).
 
 ## Route declaration
 

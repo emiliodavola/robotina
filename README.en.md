@@ -129,7 +129,7 @@ services**, this is what changed and why:
    ROBOTINA_TELEGRAM_ALLOWED_USERS=        # optional: who may use the bot
    ROBOTINA_OPENCODE_SERVER_PASSWORD=      # optional: HTTP Basic for the server
    ROBOTINA_GITHUB_TOKEN=                  # optional: fine-grained PAT
-   ROBOTINA_HF_TOKEN=                      # optional: Hugging Face token (gated)
+   ROBOTINA_HF_TOKEN=                      # optional: Hugging Face token (gated repos)
    ROBOTINA_GEMINI_API_KEY=                # optional: Google AI Studio key
    ```
 
@@ -350,23 +350,39 @@ compose publishes it to the container as `HF_TOKEN`, the name `huggingface_hub`
 reads. There is no `hf auth login` and no credentials file: the CLI reads the
 environment variable.
 
-**The competition's scored model is a gated repo.**
-`google/gemma-4-31B-it-qat-w4a16-ct` requires the token's account to have
-**accepted the licence** on huggingface.co. That acceptance is a human step on
-the site, not something the stack does. Without a token the CLI is anonymous and
-Hugging Face answers 401/403 when you use it; the stack still starts unchanged.
+**The competition's scored model is a gated repo in the CLI's support sense,
+public today.** Measured 2026-09-30, with no credential involved, the API
+answers anonymously `"gated": false` and `"private": false` for
+`google/gemma-4-31B-it-qat-w4a16-ct`, so the weights are readable without a
+token today. The token stays wired and is still worth setting: the repository
+owner can turn a gate on at any time and the licence terms still apply. While
+the gate is off **there is nothing to accept on huggingface.co**.
 
-The read-only probe, once the image is rebuilt and the container recreated:
+The read-only probe, with the image rebuilt and the container recreated with
+`ROBOTINA_HF_TOKEN` set:
 
 ```bash
-docker compose exec robotina hf download google/gemma-4-31B-it-qat-w4a16-ct --dry-run
+docker compose exec robotina sh -c \
+  'curl -fsS -m 30 -o /dev/null -r 0-100 \
+   -H "Authorization: Bearer $HF_TOKEN" \
+   https://huggingface.co/google/gemma-4-31B-it-qat-w4a16-ct/resolve/main/model.safetensors && echo "acceso ok"'
 ```
 
-It needs a rebuild and a `--force-recreate`: the image running today has no CLI.
+The `-f` is what makes it able to fail: it turns a 4xx/5xx into a non-zero exit
+status, and a bare `curl` exits `0` on a 4xx — that is the trap. `-r 0-100`
+bounds the read to 100 bytes, never GBs, and the request exercises the redirect
+to the CDN, so the probe is also the egress proof.
+
+`hf download … --dry-run` is **not an access probe**: measured with and without
+a token it exits `0` in both cases because it only lists the repo's public file
+inventory. A green `--dry-run` proves nothing. The `hf` CLI is image content: it
+is not updated from inside the container, it arrives with a rebuild.
+
 Egress is already enabled: `.huggingface.co` and `.hf.co` are in
-`squid/allowlist.txt` (downloads redirect to `cas-bridge.xethub.hf.co`, which
-falls under `.hf.co`). If the download fails with 401/403, the problem is the
-token or the licence, not the allowlist.
+`squid/allowlist.txt`, and the download host measured on 2026-09-30 is
+`us.aws.cdn.hf.co`, of the xet-bridge family that `.hf.co` covers. A 401/403
+from Hugging Face means a gate appeared or the token expired / lacks the read
+scope, never that the allowlist is missing something.
 
 ## Google AI Studio: the key and egress
 
@@ -389,8 +405,10 @@ already in `squid/allowlist.txt`, so nothing has to be added. What the Google
 AI Studio section of the allowlist adds **on top** of that is the Studio surface
 and its login: `aistudio.google.com`, `ai.google.dev`, `accounts.google.com`,
 `www.google.com`, `.gstatic.com` and `.googleusercontent.com`. `aistudiocdn.com`
-stays **commented out**: it only serves the apps AI Studio generates and the
-evidence is forum level, not Google's firewall table.
+is **enabled** too: it is the CDN that serves the apps AI Studio generates (the
+importmap of their `index.html`), so without it the preview pane stays blank.
+The evidence that it is needed is the AI Studio forum, not Google's firewall
+table; the repository owner asked for it in #87.
 
 **You create the key.** Creating the API key is a human step in AI Studio
 (aistudio.google.com); the repo never creates or stores one.

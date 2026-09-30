@@ -445,10 +445,14 @@ what keeps the credential optional: an unset token leaves the CLI anonymous and 
 the moment of use, which is a read failure the agent reports, not a boot failure. `ROBOTINA_HF_TOKEN` SHALL
 be documented in `.env.example` with no value, next to the GitHub PAT.
 
-The token is only half of the gate. `google/gemma-4-31B-it-qat-w4a16-ct` is a **gated** repository: its
-licence has to be accepted on huggingface.co with the token's account, and that acceptance is a human step
-outside this repository. The documentation SHALL record the caveat where the credential is described; the
-stack SHALL NOT claim to perform it.
+The credential exists for the capability, not for a present gate. Measured anonymously on 2026-09-30,
+`https://huggingface.co/api/models/google/gemma-4-31B-it-qat-w4a16-ct` answers `"gated": false` and
+`"private": false`, so the repository is public today and its weights are readable without a token; there
+is no acceptance step to perform on huggingface.co while the gate is off. The credential SHALL still be
+required for the capability it grants — the repository owner can activate a gate at any time and the licence
+terms still apply — so this requirement asserts the credential and its honest status, not an acceptance
+step. The documentation SHALL record that status where the credential is described, and the repository SHALL
+NOT be documented as gated while the API reports otherwise.
 
 #### Scenario: Both names exist and are independently settable
 
@@ -503,17 +507,36 @@ stack SHALL NOT claim to perform it.
   `odd/tasks/single-robotina-container.md:501-506`. CR4 is NOT changed by this requirement — this recipe
   exists so that a change can prove its own cleanliness without waiting on that repair.
 
-#### Scenario: The gated caveat is documented
+#### Scenario: The repo's gating status is reported as measured
 
 - GIVEN the change is applied
-- WHEN both READMEs are searched for the gated model
-- THEN both name it
-- PROOF: `grep -n "gemma-4-31B-it-qat-w4a16-ct" README.md README.en.md`
-  (non-empty in both; measured: 2 hits in each)
-- NOTE: `README.md:342` and `README.en.md:353` state that the token's account has to have accepted the
-  licence on huggingface.co, and each README also carries the read-only probe
-  `docker compose exec robotina hf download google/gemma-4-31B-it-qat-w4a16-ct --dry-run` — which is why
-  the assertion names the model id rather than the word "gated".
+- WHEN the credential's documentation is searched for the model id and for the measured status
+- THEN the model id is named in all three files and the measured status appears where the credential is
+  described
+- PROOF: `grep -n "gemma-4-31B-it-qat-w4a16-ct" README.md README.en.md SECURITY.md`
+  (non-empty in all three) together with `grep -rn '"gated": false' README.md SECURITY.md`
+  (non-empty in both; measured 2026-09-30, anonymous)
+- NOTE: the previous version of this scenario asserted the presence of the word "gated", which is what let
+  the false claim into PR #86. The assertion now names the model id plus the measured status, so a document
+  that calls the repository gated while the API says otherwise fails it. `README.md` and `README.en.md`
+  carry both the measured status and the access probe; `SECURITY.md` records the same status next to the
+  `HF_TOKEN` inventory row and in "Puntos de atención".
+
+#### Scenario: The access probe fails loudly when there is no access
+
+- GIVEN the image is rebuilt and the container is recreated with `ROBOTINA_HF_TOKEN` set
+- WHEN the probe reads a bounded byte range of the weights through the proxy
+- THEN a 4xx or 5xx from Hugging Face turns into a non-zero exit status
+- PROOF:
+  `docker compose exec robotina sh -c 'curl -fsS -m 30 -o /dev/null -r 0-100 -H "Authorization: Bearer $HF_TOKEN" https://huggingface.co/google/gemma-4-31B-it-qat-w4a16-ct/resolve/main/model.safetensors && echo "acceso ok"'`
+  (prints `acceso ok` on success; non-zero exit on a gate, an expired token or a missing allowlist entry)
+- NOTE: `hf download <repo> --dry-run` is NOT this probe: measured with and without a token it exits `0` in
+  both cases because it only lists the repo's public file inventory, so a green run is not evidence of
+  access — do not reintroduce it as an access check. A bare `curl` also exits `0` on a 4xx, which is the
+  trap `-f` closes. The ranged read needs no weight download (`-r 0-100` reads 100 bytes, never GBs) and it
+  exercises the redirect to the download CDN, so it doubles as the egress proof for the `.hf.co` allowlist
+  entry; the download host measured on 2026-09-30 is `us.aws.cdn.hf.co`, which falls under the same
+  `.hf.co` family.
 
 ### Requirement: CR12 — The Google AI Studio key reaches the container under the name AI Studio documents
 

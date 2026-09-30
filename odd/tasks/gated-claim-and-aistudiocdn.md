@@ -58,25 +58,33 @@ Branch: `fix/issue-87-gated-claim-and-aistudiocdn`, off `main`. Owner: `emilioda
 
 ## Tasks
 
-- [ ] T1 — Branch, issue #87 and this tracker.
-- [ ] T2 — `squid/allowlist.txt`: enable `aistudiocdn.com`, fix the CDN host comment. Recreate the
-      proxy and verify the tunnel.
-- [ ] T3 — Docs: `README.md`, `README.en.md`, `SECURITY.md`, `hermes/context/.hermes.md`.
-- [ ] T4 — Contract: `openspec/specs/agent-credentials/spec.md` CR11.
+- [x] T1 — Branch, issue #87 and this tracker.
+- [x] T2 — `squid/allowlist.txt`: `aistudiocdn.com` enabled, CDN host comment fixed, proxy recreated
+      and verified. Commit `…`
+- [x] T3 — Docs: `README.md`, `README.en.md`, `SECURITY.md`, `hermes/context/.hermes.md`, plus the
+      stale `aistudiocdn.com` prose and the `compose.yml` comment.
+- [x] T4 — Contract: `openspec/specs/agent-credentials/spec.md` CR11.
 - [ ] T5 — Verification: the recipes of both axes, plus an independent read-only verifier.
 - [ ] T6 — Push and PR against `main` (`Closes #87`), assigned to `emiliodavola`.
 
 ## Verification
 
-| Fact | Recipe |
-| --- | --- |
-| The gate claim is what the API says | `docker compose exec robotina sh -c 'curl -sS -m 25 https://huggingface.co/api/models/google/gemma-4-31B-it-qat-w4a16-ct \| tr "," "\n" \| grep -E "\"gated\"\|\"private\""'` |
-| The new probe can fail (and passes today) | `docker compose exec robotina sh -c 'curl -fsS -m 30 -o /dev/null -r 0-100 -H "Authorization: Bearer $HF_TOKEN" https://huggingface.co/google/gemma-4-31B-it-qat-w4a16-ct/resolve/main/model.safetensors && echo acceso-ok'` (exit 0; a 4xx makes it exit 22) |
-| The new probe really fails on a 4xx | same command pointed at a nonexistent path: `curl -fsS -o /dev/null -r 0-100 https://huggingface.co/google/gemma-4-31B-it-qat-w4a16-ct/resolve/main/no-existe.json` (exit non-zero) |
-| `aistudiocdn.com` is admitted now | `docker compose exec robotina sh -c 'curl -m 15 -sS -o /dev/null -D - https://aistudiocdn.com/ \| head -2'` (no `Server: squid`; the origin answers) and `docker logs egress-proxy 2>&1 \| grep aistudiocdn \| tail -2` (`TCP_TUNNEL`) |
-| The allowlist still parses | `MSYS_NO_PATHCONV=1 docker compose run --rm --no-deps --entrypoint /usr/sbin/squid egress-proxy -f /etc/squid/squid.conf -k parse` (exit 0) |
-| Compose still validates | `docker compose config -q` (exit 0) |
-| The false claim is gone | `grep -rniE "gated" README.md README.en.md SECURITY.md hermes/context/.hermes.md` — every remaining mention must be conditional and anchored in the measurement |
+Every row was run. This branch needs no rebuild: the image is the one #85 left.
+
+| Fact | Recipe | Result |
+| --- | --- | --- |
+| The gate claim is what the API says | `docker compose exec robotina sh -c 'curl -sS -m 25 https://huggingface.co/api/models/google/gemma-4-31B-it-qat-w4a16-ct \| tr "," "\n" \| grep -E "\"gated\"\|\"private\""'` | `"private":false` and `"gated":false`, anonymously |
+| The new probe passes today | the ranged read with `-f` and `-r 0-100` (positive) | exit 0, `acceso ok` |
+| The new probe can fail | the same shape against `resolve/main/no-existe.json` | exit **22** — the 4xx cuts, which is the whole point |
+| `--dry-run` is not a probe | `hf download <repo> --dry-run`, with and without a token | exit 0 in both cases: the branch documents it as a non-proof instead of a check |
+| `aistudiocdn.com` is admitted now | `docker compose exec robotina sh -c 'curl -m 15 -sS -o /dev/null -D - https://aistudiocdn.com/ \| head -2'` | two blocks: `200 Connection established` then `HTTP/2 200` with `server: cloudflare`; exit 0, no `Server: squid` |
+| … and the proxy logged the decision | `docker logs egress-proxy 2>&1 \| grep aistudiocdn \| tail -1` | `domain=aistudiocdn.com method=CONNECT squid=TCP_TUNNEL http=200` |
+| Fail-closed is intact | the same probe against a non-allowlisted host | one block: `403` + `Server: squid`, exit 56; log says `squid=TCP_DENIED http=403` |
+| The allowlist still parses | `MSYS_NO_PATHCONV=1 docker compose run --rm --no-deps --entrypoint /usr/sbin/squid egress-proxy -f /etc/squid/squid.conf -k parse` | exit 0 |
+| Compose still validates | `docker compose config -q` | exit 0 |
+| The false claim is gone | `grep -rniE "gated\|licencia\|licence"` over the five files | 26 hits, all of them conditional, measured, or about the CLI's capability; none asserts the gate as a present fact |
+| The wrong CDN host is gone | `grep -rn cas-bridge README.md README.en.md SECURITY.md hermes/context/.hermes.md` | empty; `us.aws.cdn.hf.co` present in both READMEs |
+| Independent read-only verification | `gentle-ai-verify` over `main..HEAD` | PENDING |
 
 ## Route declaration
 
