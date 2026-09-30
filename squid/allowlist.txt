@@ -56,3 +56,14 @@ sum.golang.org
 # --- Kaggle (competencia gemma-4-developer-agent) ---
 .kaggle.com
 .googleapis.com
+
+# --- arXiv + Semantic Scholar (papers) ---
+.arxiv.org
+api.semanticscholar.org
+
+# --- Wayback Machine (páginas bloqueadas) ---
+.archive.org
+
+# --- Hugging Face (pesos y datasets; incluye redirects a xethub) ---
+.huggingface.co
+.hf.co
