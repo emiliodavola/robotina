@@ -46,12 +46,33 @@ Branch: `fix/issue-78-opencode-run-guard`, off `main`. Owner: `emiliodavola`. Cl
 ## Tasks
 
 - [x] T1 — Branch and this tracker.
-- [ ] T2 — Wrapper guard for `run` without `--agent`; header documents it.
-- [ ] T3 — Spec OD1 guard requirement + OD3 default-decides scenario reconciled.
-- [ ] T4 — Docs: `hermes/skills/opencode-delegation/SKILL.md` and `hermes/context/.hermes.md`.
-- [ ] T5 — Verification (`sh -n`/`dash -n`, refusal exit `2`, help/version passthrough, `serve`
+- [x] T2 — Wrapper guard for `run` without `--agent`; header documents it.
+- [x] T3 — Spec OD1 guard requirement + OD3 default-decides scenario reconciled.
+- [x] T4 — Docs: `hermes/skills/opencode-delegation/SKILL.md` and `hermes/context/.hermes.md`.
+- [x] T5 — Verification (`sh -n`/`dash -n`, refusal exit `2`, help/version passthrough, `serve`
       passthrough, `docker compose config -q`) plus an independent read-only verifier.
 - [ ] T6 — Commit per work unit, push, PR against `main` assigned to the owner.
+
+## Verification (independent, read-only)
+
+`gentle-ai-verify` over `main..HEAD` (2026-09-29): **8/8 items PASS, no Blocking/High finding.** Observed:
+refusal exits `2` with stdout 0 bytes and `nombra el ejecutor` on stderr; `--version`, `--help`,
+`run --help`, `run --agent=build --help`, `serve --help` and `debug paths` all pass; `run -m …` without
+`--agent` is refused; OD3's contradictory scenario is gone; OD2 and `overlay.json` are untouched.
+
+Addressed after the report:
+
+- **spec:93** — OD1's requirement now says exit `2`, not merely "non-zero".
+- **spec:203** — OD3's refusal PROOF no longer claims an "edited file" failure that the recipe cannot
+  observe: the guard refuses before `exec`, so no turn is submitted at all.
+- **`.hermes.md:51`** — now names the `run --help` exception.
+
+Left as-is (Info, structural): `run --agent` with a missing value counts as "explicit agent" and passes
+the guard; the real CLI then errors on the missing value, so it is not a silent no-op, and tightening
+it needs lookahead parsing that is not worth the complexity here.
+
+Not verifiable without the maintenance window: the baked `/opt/robotina/bin/opencode` copy; the OD3
+mutation proof and the OD2 runtime scenarios were not run (they need live turns / the rebuilt image).
 
 ## Pending after this PR
 
