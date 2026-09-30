@@ -97,6 +97,10 @@ get executed. Never delegate a task that must be *done* to `gentle-orchestrator`
   on the orchestrator — the decision recorded in commit `3588eef`) — so **every delegation path
   must name the executor explicitly**: the CLI with `--agent build`, and `opencode-delegate` with
   its `--agent` flag (default `build`). Never rely on the merged `default_agent`.
+- The `/opt/robotina/bin/opencode` wrapper enforces that on the non-interactive path: `opencode run`
+  without `--agent` is **refused** (exit `2`, a message naming `--agent build`) instead of silently
+  landing on the coordinator and closing without doing the work. The TUI is untouched (the human
+  surface), `--help` passes, and `/usr/local/bin/opencode` is the escape hatch.
 
 ## The model rule
 
