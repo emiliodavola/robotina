@@ -161,7 +161,7 @@ are called out because they change the recipe.
 - [x] T7 — Verification: the image built clean (`robotina:local` = `sha256:39e9aa79…`; the `hf` section
       and the final inventory assertion both ran), the image recipes pass, and `gentle-ai-verify` attacked
       10 claims over `main..HEAD` without falsifying 7 of them; its 3 findings are fixed (Diagnosis 13).
-- [ ] T8 — Push and PR against `main`, assigned to `emiliodavola`.
+- [x] T8 — Push and PR against `main`, assigned to `emiliodavola`: **PR #86**.
 
 ## Verification
 
