@@ -34,6 +34,14 @@ detector was a no-op and an `external_directory: ask` delegation burned the whol
 `4` instead of exiting `2` naming the block. The abort also left the request listed on the server;
 a v1 reject clears it.
 
+Issue #79 added the sixth: **a budget exhaustion must name the session and a retry path, because a
+turn that ran out of time is not the same fact as a turn that stalled.** Measured on 2026-09-29: a
+12-skill delegation was aborted at the global timeout **after** pushing its branch, and the helper
+printed a single line with neither the session id nor the `--session` flag, so the caller had to
+rediscover the pushed work by hand. The same measurement showed that `GET /session/{id}/diff`
+returns `[]` even after the agent wrote a file, so the snapshot reads `git status` of the session
+directory instead.
+
 Artifact language: English.
 
 ## Verification model
@@ -550,3 +558,68 @@ splitting guidance lives in the skill.
 - NOTE: the helper is baked into the image, so this uses the stale-image recipe of the verification
   model; after a rebuild and `--force-recreate` the same proof runs against
   `/opt/robotina/bin/opencode-delegate`.
+
+### Requirement: OD12 — A budget exhaustion names the session and a retry path
+
+When `opencode-delegate` ends a turn because the global budget ran out (exit `4`), it SHALL print, on
+stderr and without changing the exit code, (a) a retry command that resumes that same session
+(`--session SID`) carrying the effective agent, provider, model and timeout, and (b) a bounded
+progress snapshot of what the turn had reached: the `git status` of the session's canonical
+`directory`, the agent's own todo list when it has one, and a truncated last assistant text. It SHALL
+emit a **one-shot** advisory when the elapsed time reaches 80% of the budget, before the abort.
+stdout SHALL stay empty on exit `4`, and every snapshot read SHALL be best-effort: an unreadable
+source MUST NOT change the exit code, the abort, or the already-printed timeout line.
+
+Measured origin (#79): a 12-skill delegation was aborted at the global timeout **after** pushing its
+branch — a productive turn, not a stalled one — and the caller got a single line with no session id
+and no `--session` hint, so the pushed work had to be rediscovered by hand. The same measurement
+showed that the endpoint that looks like the natural source for "what did it change",
+`GET /session/{id}/diff`, returns `[]` even after the agent writes a file, so the snapshot reads
+`git status` of the session directory instead.
+
+#### Scenario: The exit-4 message carries the session and the retry command
+
+- GIVEN the stack is up and a delegation whose turn keeps running
+- WHEN the global budget expires
+- THEN the helper exits `4` and stderr carries the resume command with the session id
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -c 'ROBOTINA_OPENCODE_DELEGATE_TIMEOUT=3 sh -s -- "Run the shell command sleep 40 and then reply with exactly DONE"' < robotina/bin/opencode-delegate`
+  (must exit `4`; stderr must carry `para retomar: opencode-delegate --session ses_`; a missing hint
+  or a non-4 exit is a FAILURE)
+
+#### Scenario: The 80% advisory fires exactly once
+
+- GIVEN the same budget-expiring delegation
+- WHEN the elapsed time crosses 80% of the budget
+- THEN stderr carries one advisory naming elapsed and total seconds
+- PROOF: the run above, with its stderr captured to a file: `grep -c 'presupuesto al 80%'` (must be
+  exactly `1`; `0` is a FAILURE and a count `> 1` proves the advisory is not one-shot)
+
+#### Scenario: The snapshot reports the session tree, and stdout stays clean
+
+- GIVEN a throwaway git repository with a modified tracked file, used as the session directory
+- WHEN the budget expires
+- THEN stderr lists the `git status` entries and stdout is empty
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -c 'd=/tmp/od12.XXXXXX; mkdir -p "$d"; cd "$d"; git init -q; git config user.email od12@robotina.local; git config user.name od12; printf "a\n" > f.txt; git add f.txt; git commit -qm init; printf "a\nb\n" > f.txt; ROBOTINA_OPENCODE_DELEGATE_TIMEOUT=3 sh -s -- --directory "$d" "Run the shell command sleep 40 and then reply with exactly DONE"' < robotina/bin/opencode-delegate`
+  (stderr must carry `git (` and ` M f.txt`; stdout must be 0 bytes; a non-empty stdout is a
+  FAILURE)
+- NOTE: this scenario needs no model edit to be non-vacuous: the dirty file is created before the
+  delegation, so the `git status` entries exist the moment the budget expires.
+
+#### Scenario: A healthy turn prints neither the advisory nor the snapshot
+
+- GIVEN a delegation that closes inside its budget
+- WHEN the helper exits `0`
+- THEN stderr carries neither the advisory nor the snapshot block, and stdout is exactly the answer
+- PROOF: the OD6 30 s proof (exit `0`, prints `DONE`): its stderr MUST NOT match
+  `presupuesto al 80%` or `snapshot del progreso`, and its stdout MUST be exactly `DONE` (this is the
+  non-vacuous control: the new lines exist only on the exit-4 path)
+
+#### Scenario: The snapshot degrades instead of failing
+
+- GIVEN a session whose `directory` is not a git work tree
+- WHEN the budget expires
+- THEN the helper still exits `4` with the timeout line and the resume command, and omits only the
+  `git` line
+- PROOF: the exit-4 proof above run with no `--directory` (the server's own `/workspace` cwd, which
+  is not a git work tree): stderr must still carry `para retomar: opencode-delegate --session ses_`
+  and MUST NOT carry a `git (` line; a non-4 exit is a FAILURE
