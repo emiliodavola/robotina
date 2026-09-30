@@ -158,8 +158,9 @@ are called out because they change the recipe.
       Commit `326a5a0`.
 - [x] T10 — Google AI Studio key: `compose.yml` wiring (commit `5ba0eda`) and docs (commit
       `e5b1e07`).
-- [ ] T7 — Verification: `docker compose build robotina`, then the image recipes, plus an independent
-      read-only verifier over `main..HEAD`.
+- [x] T7 — Verification: the image built clean (`robotina:local` = `sha256:39e9aa79…`; the `hf` section
+      and the final inventory assertion both ran), the image recipes pass, and `gentle-ai-verify` attacked
+      10 claims over `main..HEAD` without falsifying 7 of them; its 3 findings are fixed (Diagnosis 13).
 - [ ] T8 — Push and PR against `main`, assigned to `emiliodavola`.
 
 ## Verification
