@@ -89,6 +89,12 @@ delegation path that must get work done SHALL name the executor explicitly**: th
 flag, default `build`). A delegated turn SHALL therefore run on `build` even when the merged
 `default_agent` is `gentle-orchestrator`.
 
+The CLI wrapper `/opt/robotina/bin/opencode` SHALL enforce that rule for the non-interactive path: it
+SHALL refuse `opencode run` when no `--agent` is present, exiting non-zero with a message that names
+`--agent build`, so the raw default can never silently leave the work unexecuted. The interactive TUI,
+`--help`, and every other subcommand SHALL pass unchanged, and `/usr/local/bin/opencode` remains the
+escape hatch.
+
 Rationale, measured: the helper sent `{model, parts}` only, both sessions of issue #38 ran with
 `info.agent = "gentle-orchestrator"`, and `gentle-orchestrator` coordinates sub-agents instead of
 executing. Commit `3588eef` pins the orchestrator as the config default on purpose, so the
@@ -108,6 +114,22 @@ invariant lives in the delegation path and not in the config default.
 - WHEN the source overlay is searched for the key
 - THEN a `"default_agent"` line is present
 - PROOF: `grep -n '"default_agent"' robotina/overlay.json` (non-empty; an empty match is a FAILURE)
+
+#### Scenario: The CLI wrapper refuses a `run` that does not name the executor
+
+- GIVEN the change is applied
+- WHEN the wrapped `opencode` CLI is invoked as `run "<task>"` with no `--agent` and no `--help`
+- THEN it exits non-zero with a message naming `--agent build`, and submits nothing
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -s -- run "say hi" < robotina/bin/opencode`
+  (must exit `2` and stderr must carry `nombra el ejecutor`) together with the non-vacuous controls
+  `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -s -- run --help < robotina/bin/opencode`
+  (must NOT print the refusal) and
+  `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -s -- --version < robotina/bin/opencode`
+  (must print a version, proving the wrapper still reaches the real binary)
+- NOTE: the wrapper is baked into the image, so this uses the stale-image recipe of the verification
+  model; after a rebuild and `--force-recreate` the same proof runs against
+  `/opt/robotina/bin/opencode`. The guard exists because the merged default does not execute (see the
+  rationale above).
 
 #### Scenario: The helper sends the agent in the request body
 
@@ -172,14 +194,17 @@ delegation MUST run as the `hermes` user (see the verification model): that is w
   `/tmp` path created by an earlier root-run probe is root-owned, and the next `hermes`-user run
   then fails on the redirect instead of on the delegation.
 
-#### Scenario: The default agent executes with no explicit `--agent`
+#### Scenario: The default-decides path is refused instead of silently unexecuted
 
-- GIVEN the stack is up
-- WHEN the same delegation is repeated without `--agent`, so the merged `default_agent` decides
-- THEN the file is still mutated, which a coordinating agent that never executes could not do
-- PROOF: `docker compose exec -T -u hermes robotina sh -c 'set -e; d=$(mktemp -d /tmp/od3def.XXXXXX); cd "$d"; git init -q; git config user.email od3@robotina.local; git config user.name od3; printf "def mul(a, b):\n    return a + b\n" > m.py; git add m.py; git commit -qm init; opencode run -m opencode-go/deepseek-v4-flash "Fix the bug in m.py so mul() multiplies. Do not change anything else." >run.log 2>&1; grep -n "return a \* b" m.py'`
-  (must print the corrected line; this is the end-to-end proof that OD1's config key has the
-  intended effect, because with `gentle-orchestrator` as the default the file is not edited)
+- GIVEN the stack is up and the merged `default_agent` is the coordinating agent
+- WHEN the same delegation is repeated without `--agent`, so the merged `default_agent` would decide
+- THEN the wrapper refuses it before any turn is submitted, naming `--agent build`
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -s -- run "Fix the bug in m.py so mul() multiplies. Do not change anything else." < robotina/bin/opencode`
+  (must exit `2` and print the refusal; a submitted turn or an edited file is a FAILURE)
+- NOTE: this is the non-vacuous control for OD1. Before this requirement the same invocation went to
+  `gentle-orchestrator`, which never executes inline, and the file stayed unedited — a silent no-op.
+  The mutation proof lives in the scenario above, which names `--agent build` explicitly. The wrapper
+  is baked, so the stale-image recipe trumps the running copy until the maintenance window.
 
 #### Scenario: The assertion is not vacuous
 
