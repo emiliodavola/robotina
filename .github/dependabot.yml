@@ -7,9 +7,9 @@
 #
 # Lo que NO cubre, y por eso no esta aca:
 #
-#   - Las seis dependencias que el Dockerfile fija en `ARG` (engram, gentle-ai,
-#     marksman, gh, taplo, opencode-ai). El parser `docker` de Dependabot
-#     resuelve tags de `FROM` e `image:`, no valores de `ARG`. Para esas seis
+#   - Las siete dependencias que el Dockerfile fija en `ARG` (engram, gentle-ai,
+#     marksman, gh, taplo, opencode-ai, huggingface-hub). El parser `docker` de
+#     Dependabot resuelve tags de `FROM` e `image:`, no valores de `ARG`. Para esas siete
 #     esta `scripts/bump-tools.sh` (`--check` reporta, `--write` mueve el pin).
 #   - Los tarballs de releases de GitHub (gh, engram, taplo, marksman, gentle-ai)
 #     y los paquetes de `apt` sin lockfile: no hay ecosistema.

@@ -53,10 +53,11 @@ FROM nousresearch/hermes-agent:v2026.9.24@sha256:fca358f12efd65bfaaca05884166f15
 # siguientes son nuevas y se fijan para que el merge sea reproducible: el
 # binario de opencode cambia de assets entre releases (riesgo glibc/musl).
 #
-# Estas seis NO son visibles para Dependabot: su parser de `docker` resuelve tags
-# de `FROM` e `image:`, no valores de `ARG`, y no hay ecosistema para un tarball
-# de releases de GitHub. Para esas seis esta `scripts/bump-tools.sh`, que resuelve
-# la ultima version y reescribe el pin (ver #52).
+# Estas siete NO son visibles para Dependabot: su parser de `docker` resuelve tags
+# de `FROM` e `image:`, no valores de `ARG`, y ningun ecosistema lee un pin escrito
+# en un `ARG` (ni el de un tarball de releases de GitHub ni el de un paquete de
+# PyPI). Para esas siete esta `scripts/bump-tools.sh`, que resuelve la ultima
+# version y reescribe el pin (ver #52).
 ARG ENGRAM_VERSION=2.2.1
 ARG GENTLE_AI_VERSION=3.1.0
 ARG MARKSMAN_RELEASE=2026-02-08
@@ -66,6 +67,17 @@ ARG TAPLO_VERSION=0.10.0
 # taplo no publica checksums.txt en su release: el pin es este sha256, medido
 # sobre taplo-linux-x86_64.gz de la version de arriba.
 ARG TAPLO_SHA256=8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156
+
+# hf (el cliente de Hugging Face) viene de PyPI, no de un release ni de npm, pero
+# la regla es la misma: el ARG es la unica fuente de version. Va
+# `huggingface_hub` y NO el paquete `hf`: desde 2.0.0 el extra `[cli]` ya no
+# existe (la CLI se extrajo al proyecto `hf`) y ese proyecto publica sus ruedas
+# con `Dynamic: requires-dist`, que uv no resuelve — medido: `uv pip install
+# hf==1.32.0`, `==1.33.0` y `==2.0.0` mueren con "no version of hf==<v> ...
+# unsatisfiable", mientras `hf==1.31.0` si instala. `huggingface_hub==2.0.0`
+# resuelve y ya trae el console script `hf`, asi que un solo pin cubre la
+# biblioteca y la CLI, que se versionan juntas.
+ARG HUGGINGFACE_HUB_VERSION=2.0.0
 
 # El pin de engram se publica al contenedor para que el healthcheck pueda
 # comparar lo que CORRE contra lo que esta imagen fijo. No es decorativo: el
@@ -241,7 +253,29 @@ RUN uv python install 3.13 \
 # PATH se appendea: /opt/uv/bin va DESPUES de /opt/hermes/.venv/bin.
 ENV PATH=$PATH:/opt/uv/bin
 
-# --- 7. engram (memoria del agente): release + checksum ----------------------
+# --- 7. hf (CLI de Hugging Face): PyPI, pin por ARG --------------------------
+# El cliente que baja pesos y datasets del Hub. Tres decisiones, ninguna cosmetica:
+#
+#   `huggingface_hub` y no el paquete `hf`: ver el ARG de arriba. Un solo pin
+#     cubre la biblioteca y la CLI.
+#
+#   Venv propio en /opt/hf y NO `uv tool install`: UV_TOOL_DIR y UV_TOOL_BIN_DIR
+#     apuntan DENTRO del bind de /opt/data (son estado del agente), asi que todo
+#     lo que se hornee ahi lo tapa la montura en runtime y se pierde. /opt/hf es
+#     una ruta de imagen que ninguna montura tapa. El interprete que enlaza es el
+#     CPython administrado por uv que hornea el paso 6; su volumen nativo se
+#     siembra desde la imagen, asi que el enlace sigue valido en runtime.
+#
+#   El `hf --version` de la asercion imprime `2.0.0` en stdout y deja en stderr
+#     el aviso de la skill `hf-cli`. El grep va contra stdout a proposito: el
+#     aviso no puede satisfacer la asercion.
+RUN set -eux; \
+    uv venv --python 3.13 /opt/hf; \
+    uv pip install --python /opt/hf/bin/python "huggingface_hub==${HUGGINGFACE_HUB_VERSION}"; \
+    ln -sf /opt/hf/bin/hf /usr/local/bin/hf; \
+    hf --version | grep -F "${HUGGINGFACE_HUB_VERSION}"
+
+# --- 8. engram (memoria del agente): release + checksum ----------------------
 RUN set -eux; \
     f="engram_${ENGRAM_VERSION}_linux_amd64.tar.gz"; \
     base="https://github.com/Gentleman-Programming/engram/releases/download/v${ENGRAM_VERSION}"; \
@@ -252,7 +286,7 @@ RUN set -eux; \
     install -m 0755 /tmp/engram /usr/local/bin/engram; \
     engram --version
 
-# --- 8. gentle-ai (el instalador, no una copia de sus archivos) --------------
+# --- 9. gentle-ai (el instalador, no una copia de sus archivos) --------------
 # Los artefactos de gentle-ai NO se copian a mano: los genera su propio
 # instalador en un staging durante el build, y el oneshot opencode-init los
 # aplica al arrancar. Actualizar gentle-ai = subir la version y reconstruir;
@@ -275,7 +309,7 @@ RUN mkdir -p /opt/gentle-ai-stage \
  && find /opt/gentle-ai-stage -maxdepth 4 -mindepth 1 -print \
  && echo "--- fin de artefactos ---"
 
-# --- 9. /etc/gitconfig: preservar y despues mergear ---------------------------
+# --- 10. /etc/gitconfig: preservar y despues mergear --------------------------
 # El config de SISTEMA de git es programa, no estado: el helper de credenciales
 # lee el token del entorno via gh, y las URLs SSH se reescriben a HTTPS porque
 # el proxy de egreso solo permite CONNECT al 443. El config GLOBAL (identidad,
@@ -302,7 +336,7 @@ RUN set -eux; \
       echo "robotina: la base vendor no trae /etc/gitconfig; no hay nada que preservar"; \
     fi
 
-# --- 10 y 11. archivos propios: overlay, oneshot, healthcheck y arbol s6 ----
+# --- 11 y 12. archivos propios: overlay, oneshot, healthcheck y arbol s6 ----
 # Todo el contexto de build entra en un unico COPY y un RUN lo instala en sus
 # rutas definitivas. Se hace asi (y no con un `COPY s6/` literal) porque el
 # arbol s6 lo entrega el slice de supervision: con COPY por directorio el build
@@ -420,12 +454,12 @@ RUN set -eux; \
 # intacto (el venv de Hermes conserva prioridad); aca solo se antepone.
 ENV PATH=/opt/robotina/bin:$PATH
 
-# --- 12. aserciones finales ---------------------------------------------------
+# --- 13. aserciones finales ---------------------------------------------------
 # La suite de verificacion del cambio (39 requisitos) asume TODO este
 # inventario. Una herramienta faltante tiene que fallar el BUILD, no un probe.
 RUN set -eux; \
     command -v gh jq rg go opencode taplo marksman codegraph engram gentle-ai \
-                uv node npm python3 R pgrep pkill ss curl git; \
+                uv node npm python3 R hf pgrep pkill ss curl git; \
     gh --version; \
     jq --version; \
     rg --version | head -1; \
@@ -436,6 +470,7 @@ RUN set -eux; \
     codegraph --version; \
     engram --version; \
     gentle-ai --version; \
+    hf --version; \
     uv --version; \
     node --version; \
     npm --version; \

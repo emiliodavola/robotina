@@ -10,7 +10,8 @@
 # Por que existe: Dependabot no puede con estas dependencias. Su parser `docker`
 # resuelve tags de `FROM` y de `image:`, no valores de `ARG`, y no hay ecosistema
 # para un tarball de release de GitHub. Sin este script, "actualizar" es
-# acordarse de seis repos, seis tags y seis nombres de asset (ver #52).
+# acordarse de siete repos, siete tags, siete nombres de asset y una API mas
+# (ver #52).
 #
 # Corre en el HOST, no adentro del contenedor: edita robotina/Dockerfile y
 # consulta las APIs publicas, que son la red del build (fuera de Squid). La
@@ -67,6 +68,7 @@ marksman github artempyanykh/marksman MARKSMAN_RELEASE
 gh github cli/cli GH_VERSION
 taplo github tamasfe/taplo TAPLO_VERSION
 opencode-ai npm opencode-ai OPENCODE_VERSION
+huggingface-hub pypi huggingface_hub HUGGINGFACE_HUB_VERSION
 EOF
 }
 
@@ -101,6 +103,15 @@ latest_of() {
       tr -d '\n' |
       sed -n 's/.*"latest"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
     ;;
+  pypi)
+    # `info.version` del JSON de PyPI ya es la ultima version ESTABLE: una
+    # pre-release no la reemplaza mientras exista una estable. El `sed` greedy
+    # toma la ULTIMA aparicion de la clave en el documento (medido: es la
+    # unica), igual que la rama de GitHub de arriba.
+    curl -fsSL -m 20 "https://pypi.org/pypi/$src/json" 2>/dev/null |
+      tr -d '\n' |
+      sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+    ;;
   esac
 }
 
@@ -131,6 +142,11 @@ write_pin() {
   GENTLE_AI_VERSION)
     echo "    AVISO: gentle-ai regenera el arbol de agentes y skills en el build."
     echo "           Ese bump pide su propia verificacion; no alcanza con mover el pin."
+    ;;
+  HUGGINGFACE_HUB_VERSION)
+    echo "    AVISO: el pin es de huggingface_hub, no del paquete hf: las ruedas"
+    echo "           de hf >= 1.32.0 declaran 'Dynamic: requires-dist' y uv no las"
+    echo "           resuelve. No cambies el pin al paquete hf."
     ;;
   esac
 }
