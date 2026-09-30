@@ -51,7 +51,7 @@ Branch: `fix/issue-78-opencode-run-guard`, off `main`. Owner: `emiliodavola`. Cl
 - [x] T4 — Docs: `hermes/skills/opencode-delegation/SKILL.md` and `hermes/context/.hermes.md`.
 - [x] T5 — Verification (`sh -n`/`dash -n`, refusal exit `2`, help/version passthrough, `serve`
       passthrough, `docker compose config -q`) plus an independent read-only verifier.
-- [ ] T6 — Commit per work unit, push, PR against `main` assigned to the owner.
+- [x] T6 — Commit per work unit, push, PR against `main` assigned to the owner: **PR #84**.
 
 ## Verification (independent, read-only)
 
