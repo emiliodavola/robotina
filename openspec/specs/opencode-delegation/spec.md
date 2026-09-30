@@ -90,7 +90,7 @@ flag, default `build`). A delegated turn SHALL therefore run on `build` even whe
 `default_agent` is `gentle-orchestrator`.
 
 The CLI wrapper `/opt/robotina/bin/opencode` SHALL enforce that rule for the non-interactive path: it
-SHALL refuse `opencode run` when no `--agent` is present, exiting non-zero with a message that names
+SHALL refuse `opencode run` when no `--agent` is present, exiting `2` with a message that names
 `--agent build`, so the raw default can never silently leave the work unexecuted. The interactive TUI,
 `--help`, and every other subcommand SHALL pass unchanged, and `/usr/local/bin/opencode` remains the
 escape hatch.
@@ -200,7 +200,8 @@ delegation MUST run as the `hermes` user (see the verification model): that is w
 - WHEN the same delegation is repeated without `--agent`, so the merged `default_agent` would decide
 - THEN the wrapper refuses it before any turn is submitted, naming `--agent build`
 - PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -s -- run "Fix the bug in m.py so mul() multiplies. Do not change anything else." < robotina/bin/opencode`
-  (must exit `2` and print the refusal; a submitted turn or an edited file is a FAILURE)
+  (must exit `2` and print the refusal on stderr with stdout empty; the guard refuses before `exec`, so
+  no turn is submitted — a non-2 exit or a missing refusal is a FAILURE)
 - NOTE: this is the non-vacuous control for OD1. Before this requirement the same invocation went to
   `gentle-orchestrator`, which never executes inline, and the file stayed unedited — a silent no-op.
   The mutation proof lives in the scenario above, which names `--agent build` explicitly. The wrapper
