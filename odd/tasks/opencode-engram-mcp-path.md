@@ -51,7 +51,7 @@ Branch: `fix/issue-77-engram-mcp-path`, off `main`. Owner: `emiliodavola`. Close
       live merged config, and `docker compose config -q` — all measured. The change is a trivial
       config value plus one spec scenario, so the proofs above are the verification (see the route
       declaration).
-- [ ] T5 — Commit per work unit, push, PR against `main` assigned to the owner.
+- [x] T5 — Commit per work unit, push, PR against `main` assigned to the owner: **PR #83**.
 
 ## Pending after this PR
 
