@@ -139,7 +139,7 @@ ROBOTINA_OPENCODE_MODEL_KEY= # clave del proveedor que usa OpenCode
 ROBOTINA_TELEGRAM_ALLOWED_USERS=   # allowlist de usuarios de Telegram (ver abajo)
 ROBOTINA_OPENCODE_SERVER_PASSWORD= # HTTP Basic del server de opencode (defensa en profundidad)
 ROBOTINA_GITHUB_TOKEN=             # PAT fine-grained; ver «Autenticación de GitHub»
-ROBOTINA_HF_TOKEN=                 # token de Hugging Face (repos gated)
+ROBOTINA_HF_TOKEN=                 # token de Hugging Face
 ROBOTINA_GEMINI_API_KEY=           # clave de Google AI Studio (se publica como GEMINI_API_KEY)
 
 # Modelo de Hermes (no son secretos; ver «Modelo y plan del proveedor»)
@@ -219,8 +219,10 @@ y los de Code Assist (`oauth2.googleapis.com`, `cloudcode-pa.googleapis.com`,
 `.googleapis.com`. Lo que la sección de Google AI Studio agrega **encima** de eso es la
 superficie del Studio y su login: `aistudio.google.com`, `ai.google.dev`,
 `accounts.google.com`, `www.google.com`, `.gstatic.com` y `.googleusercontent.com`.
-`aistudiocdn.com` queda **comentado**: solo sirve las apps que AI Studio genera y la evidencia
-es de nivel foro, no la tabla de firewall de Google. Evidencia de las entradas habilitadas: la
+`aistudiocdn.com` queda **habilitado** también: es el CDN con el que AI Studio sirve las apps que
+genera (los importmaps de su `index.html`), así que sin él la previsualización queda en blanco.
+La evidencia de que hace falta es de nivel foro, no la tabla de firewall de Google, y el dueño del
+repo lo pidió en #87. Evidencia de las demás entradas habilitadas: la
 tabla de nombres de host de Google Workspace
 (https://support.google.com/a/answer/9012184, actualizada el 2026-09-24) y la lista de hosts de
 Gemini (https://knowledge.workspace.google.com/admin/security/firewall-and-proxy-settings).
@@ -236,7 +238,7 @@ variable o por ruta, jamás por valor.
 | --- | --- | --- |
 | `ROBOTINA_TELEGRAM_BOT_TOKEN` | `.env` del repo | token emitido por @BotFather |
 | `ROBOTINA_GITHUB_TOKEN` | `.env` del repo | PAT fine-grained de GitHub |
-| `ROBOTINA_HF_TOKEN` | `.env` del repo | token de Hugging Face; se publica al contenedor como `HF_TOKEN` (repo gated `google/gemma-4-31B-it-qat-w4a16-ct`) |
+| `ROBOTINA_HF_TOKEN` | `.env` del repo | token de Hugging Face; se publica al contenedor como `HF_TOKEN` (para `google/gemma-4-31B-it-qat-w4a16-ct`, público hoy) |
 | `ROBOTINA_GEMINI_API_KEY` | `.env` del repo | clave de API de Google AI Studio; se publica al contenedor como `GEMINI_API_KEY` |
 | `ROBOTINA_HERMES_MODEL_KEY` | `.env` del repo | clave del proveedor; se publica al proceso Hermes como `OPENCODE_GO_API_KEY` |
 | `ROBOTINA_OPENCODE_MODEL_KEY` | `.env` del repo | clave del proveedor; se publica como `ROBOTINA_OPENCODE_GO_API_KEY` y el `run` de s6 la reexporta como `OPENCODE_GO_API_KEY` **solo** dentro del proceso del server de opencode |
@@ -896,8 +898,11 @@ si alguna vez regenerás la config con `hermes setup`, hay que volver a aplicarl
   vieja: `docker network rm agent_internet`.
 - **`HF_TOKEN` y `GEMINI_API_KEY` son alcanzables por todo el contenedor y legibles con un
   `docker inspect` acotado**, exactamente igual que el PAT: mismo uid (10000), sin aislamiento
-  por proceso. Por eso el token de Hugging Face que se usa acá es un token de **LECTURA** del
-  repo gated, nunca uno de escritura.
+  por proceso. Por eso el token de Hugging Face que se usa acá es un token de **LECTURA**,
+  nunca uno de escritura. Medido el 2026-09-30, el repo objetivo reporta `"gated": false` en
+  anónimo: hoy no hay nada que aceptar en huggingface.co, y un `401`/`403` de Hugging Face
+  significa que apareció un gate, nunca que falte una entrada en la allowlist. Mientras el repo
+  siga público, un token inválido no se detecta: medido, un bearer de basura también recibe `206`.
 
 ## Fuera de alcance (siguientes pasos)
 

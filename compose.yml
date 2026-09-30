@@ -156,13 +156,14 @@ services:
       # con `docker inspect`.
       GITHUB_TOKEN: ${ROBOTINA_GITHUB_TOKEN:-}
       # Token de Hugging Face (#85): el CLI `hf` lo lee de aca con el nombre
-      # exacto del vendor, sin `hf auth login`. Es para repos GATED
-      # (google/gemma-4-31B-it-qat-w4a16-ct): el token tiene que ser de una
-      # cuenta que YA acepto la licencia en huggingface.co, y el egreso necesita
-      # .huggingface.co y .hf.co en squid/allowlist.txt. Vacio (default) = el CLI
-      # queda anonimo y el 401/403 de HF se ve al usarlo, pero el arranque del
-      # stack no cambia. Mismo riesgo asumido que el PAT: legible con
-      # `docker inspect`.
+      # exacto del vendor, sin `hf auth login`. Es la credencial para repos
+      # gated, y el de la competencia (google/gemma-4-31B-it-qat-w4a16-ct) HOY
+      # no lo esta: la API responde gated:false a un pedido anonimo (medido el
+      # 2026-09-30, en #87). Un gate puede activarse cuando el dueno del repo
+      # quiera, y para eso esta el token. El egreso necesita .huggingface.co y
+      # .hf.co en squid/allowlist.txt. Vacio (default) = el CLI queda anonimo y
+      # el 401/403 de HF se ve al usarlo, pero el arranque del stack no cambia.
+      # Mismo riesgo asumido que el PAT: legible con `docker inspect`.
       HF_TOKEN: ${ROBOTINA_HF_TOKEN:-}
       # Clave de API de Google AI Studio (#85). El nombre interno es el de AI
       # Studio: es el que Google documenta para el camino "Gemini Developer API"

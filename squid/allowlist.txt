@@ -64,7 +64,10 @@ api.semanticscholar.org
 # --- Wayback Machine (páginas bloqueadas) ---
 .archive.org
 
-# --- Hugging Face (pesos y datasets; incluye redirects a xethub) ---
+# --- Hugging Face (pesos y datasets; incluye el redirect de descarga) -------
+# El redirect medido (2026-09-30) va a us.aws.cdn.hf.co, de la familia xet-bridge;
+# el issue #85 nombraba cas-bridge.xethub.hf.co. Los dos terminan en hf.co, y por
+# eso alcanza con el sufijo de abajo para cubrirlos.
 .huggingface.co
 .hf.co
 
@@ -94,7 +97,7 @@ www.google.com
 .googleusercontent.com
 
 # CDN con el que AI Studio sirve las apps que genera (los importmaps de
-# index.html). Solo hace falta si vas a correr o previsualizar esas apps: la
-# evidencia es el foro de AI Studio, no la tabla de firewall de Google, asi que
-# queda apagado. Descomentar si lo necesitas.
-# aistudiocdn.com
+# index.html). Lo pidio el dueno del repo en #87: sirve assets publicos de esas
+# apps, y sin el la previsualizacion queda en blanco. La evidencia de que hace
+# falta es el foro de AI Studio, no la tabla de firewall de Google.
+aistudiocdn.com
