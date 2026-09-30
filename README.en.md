@@ -130,6 +130,7 @@ services**, this is what changed and why:
    ROBOTINA_OPENCODE_SERVER_PASSWORD=      # optional: HTTP Basic for the server
    ROBOTINA_GITHUB_TOKEN=                  # optional: fine-grained PAT
    ROBOTINA_HF_TOKEN=                      # optional: Hugging Face token (gated)
+   ROBOTINA_GEMINI_API_KEY=                # optional: Google AI Studio key
    ```
 
    The two model keys are published under distinct names on purpose:
@@ -366,6 +367,38 @@ Egress is already enabled: `.huggingface.co` and `.hf.co` are in
 `squid/allowlist.txt` (downloads redirect to `cas-bridge.xethub.hf.co`, which
 falls under `.hf.co`). If the download fails with 401/403, the problem is the
 token or the licence, not the allowlist.
+
+## Google AI Studio: the key and egress
+
+`.env` accepts `ROBOTINA_GEMINI_API_KEY` (optional, empty default) and compose
+publishes it to the container as `GEMINI_API_KEY`, the name Google AI Studio
+documents. With no key there is no startup error: the stack still starts and the
+401/403 only appears when a tool uses the API.
+
+**Exactly one alias is published, on purpose.** Google's Gemini API page
+(https://ai.google.dev/gemini-api/docs/api-key) says the client libraries accept
+`GEMINI_API_KEY` or `GOOGLE_API_KEY` and that "If both are set, `GOOGLE_API_KEY`
+takes precedence"; the SDK reads `GOOGLE_API_KEY` first and warns when both are
+present, and that same page recommends setting only one. That is why only
+`GEMINI_API_KEY` arrives here: a tool that expects `GOOGLE_API_KEY` has to alias
+it itself.
+
+**Egress is already enabled.** The generation API
+(`generativelanguage.googleapis.com`) falls under `.googleapis.com`, which was
+already in `squid/allowlist.txt`, so nothing has to be added. What the Google
+AI Studio section of the allowlist adds **on top** of that is the Studio surface
+and its login: `aistudio.google.com`, `ai.google.dev`, `accounts.google.com`,
+`www.google.com`, `.gstatic.com` and `.googleusercontent.com`. `aistudiocdn.com`
+stays **commented out**: it only serves the apps AI Studio generates and the
+evidence is forum level, not Google's firewall table.
+
+**You create the key.** Creating the API key is a human step in AI Studio
+(aistudio.google.com); the repo never creates or stores one.
+
+**Out of scope.** The non-secret Vertex AI variables (`GOOGLE_CLOUD_PROJECT`,
+`GOOGLE_CLOUD_LOCATION`, `GOOGLE_GENAI_USE_VERTEXAI`) and the ADC path
+(`GOOGLE_APPLICATION_CREDENTIALS`), which needs a credentials file inside the
+bind.
 
 ## State, volumes and persistence
 

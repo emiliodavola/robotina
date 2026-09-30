@@ -120,6 +120,7 @@ lo que cambió y por qué:
    ROBOTINA_OPENCODE_SERVER_PASSWORD=      # opcional: HTTP Basic del server
    ROBOTINA_GITHUB_TOKEN=                  # opcional: PAT fine-grained
    ROBOTINA_HF_TOKEN=                      # opcional: token de Hugging Face (gated)
+   ROBOTINA_GEMINI_API_KEY=                # opcional: clave de Google AI Studio
    ```
 
    Las dos claves de modelo se publican con nombres distintos a propósito:
@@ -355,6 +356,39 @@ CLI. El egreso ya está habilitado: `.huggingface.co` y `.hf.co` están en
 `squid/allowlist.txt` (las descargas redirigen a `cas-bridge.xethub.hf.co`, que
 cae bajo `.hf.co`). Si la descarga falla con 401/403, el problema es el token o
 la licencia, no la allowlist.
+
+## Google AI Studio: la clave y el egreso
+
+El `.env` acepta `ROBOTINA_GEMINI_API_KEY` (opcional, default vacío) y compose
+la publica al contenedor como `GEMINI_API_KEY`, el nombre que documenta Google
+AI Studio. Sin clave no hay error de arranque: el stack levanta igual y el
+401/403 aparece recién cuando una herramienta usa la API.
+
+**Se publica un solo alias, a propósito.** La página de la API de Gemini
+(https://ai.google.dev/gemini-api/docs/api-key) dice que las bibliotecas cliente
+aceptan `GEMINI_API_KEY` o `GOOGLE_API_KEY` y que «If both are set,
+`GOOGLE_API_KEY` takes precedence»; el SDK lee `GOOGLE_API_KEY` primero y avisa
+cuando están las dos, y esa misma página recomienda definir una sola. Por eso
+acá solo llega `GEMINI_API_KEY`: una herramienta que espere `GOOGLE_API_KEY`
+tiene que aliasearla por su cuenta.
+
+**El egreso ya está habilitado.** La API de generación
+(`generativelanguage.googleapis.com`) cae bajo `.googleapis.com`, que ya estaba
+en `squid/allowlist.txt`, así que no hace falta agregar nada. Lo que la
+sección de Google AI Studio de la allowlist suma **encima** de eso es la
+superficie del Studio y su login: `aistudio.google.com`, `ai.google.dev`,
+`accounts.google.com`, `www.google.com`, `.gstatic.com` y
+`.googleusercontent.com`. `aistudiocdn.com` queda **comentado**: solo sirve las
+apps que AI Studio genera y la evidencia es de nivel foro, no la tabla de
+firewall de Google.
+
+**La clave la creás vos.** Crear la API key es un paso humano en AI Studio
+(aistudio.google.com); el repo nunca la crea ni la guarda.
+
+**Fuera de alcance.** Las variables no secretas de Vertex AI
+(`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_GENAI_USE_VERTEXAI`) y
+el camino ADC (`GOOGLE_APPLICATION_CREDENTIALS`), que necesita un archivo de
+credenciales adentro del bind.
 
 ## Estado, volúmenes y persistencia
 
