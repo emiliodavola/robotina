@@ -13,6 +13,15 @@
       "enabled": true,
       "type": "local"
     },
+    "engram": {
+      "command": [
+        "/usr/local/bin/engram",
+        "mcp",
+        "--tools=agent"
+      ],
+      "enabled": true,
+      "type": "local"
+    },
     "gh_grep": {
       "type": "remote",
       "url": "https://mcp.grep.app"

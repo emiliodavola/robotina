@@ -348,6 +348,24 @@ so `info.finish` stays `null` and the turn never completes.
   throwaway directory, never to `/tmp`: a `/tmp` path left by an earlier root-run probe is root-owned
   and the next `hermes`-user run then fails on the redirect instead of on the delegation)
 
+#### Scenario: The merged `engram` MCP entry points at the pinned binary
+
+- GIVEN the change is applied
+- WHEN the source overlay and the merged configuration are read
+- THEN the overlay declares `mcp.engram.command[0] = /usr/local/bin/engram`, and the merged config
+  resolves the same absolute path
+- PROOF: `grep -c '"/usr/local/bin/engram"' robotina/overlay.json` (must be ≥ 1) together with
+  `docker compose exec -T robotina python3 -c "import json;print(json.load(open('/opt/data/.config/opencode/opencode.json'))['mcp']['engram']['command'][0])"`
+  (must print `/usr/local/bin/engram`; a value under `/opt/data` is a FAILURE — that is the shadow AC11
+  quarantines, not the binary the image pins)
+- NOTE: measured origin (#77): the server reported the `engram` MCP as `failed` with
+  `ENOENT posix_spawn '/opt/data/.local/bin/engram'`. The merged config is produced by `opencode-init`
+  at container start, so the overlay-authored value becomes the served one only after a rebuild plus
+  `--force-recreate`; until then the overlay's key-wins semantics are proved without touching the
+  running stack with
+  `docker run --rm --entrypoint sh robotina:local -c 'cat /opt/gentle-ai-stage/.config/opencode/opencode.json' | jq -s '.[0] as $b | .[1] as $o | ($b * $o) | .mcp = (($b.mcp // {}) * ($o.mcp // {})) | .mcp.engram.command[0]' - robotina/overlay.json`
+  (must print `/usr/local/bin/engram` — the overlay's value, not the stage's)
+
 ### Requirement: CR10 — The keys the runtime reads through the profile scope live in the profile's `.env`
 
 Keys that the gateway reads through the **profile secret scope** — rather than from the container
