@@ -164,6 +164,15 @@ services:
       # stack no cambia. Mismo riesgo asumido que el PAT: legible con
       # `docker inspect`.
       HF_TOKEN: ${ROBOTINA_HF_TOKEN:-}
+      # Clave de API de Google AI Studio (#85). El nombre interno es el de AI
+      # Studio: es el que Google documenta para el camino "Gemini Developer API"
+      # (`GEMINI_API_KEY` o `GOOGLE_API_KEY`, y GOOGLE_API_KEY GANA si estan las
+      # dos, con un warning del SDK), asi que se publica UNA sola y queda claro
+      # cual manda. La API de generacion ya esta habilitada por el
+      # `.googleapis.com` de squid/allowlist.txt. Vacio (default) = la llamada
+      # responde 401/403 al usarla y el arranque del stack no cambia. Mismo
+      # riesgo asumido que el PAT: legible con `docker inspect`.
+      GEMINI_API_KEY: ${ROBOTINA_GEMINI_API_KEY:-}
       # Modelo de Hermes (NO son secretos). Los consume el cont-init
       # 30-robotina-model, que apunta `config.yaml` a este proveedor, endpoint y
       # modelo. Si no se definen en .env, se usan los defaults entre parentesis.
