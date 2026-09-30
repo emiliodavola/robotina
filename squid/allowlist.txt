@@ -56,3 +56,45 @@ sum.golang.org
 # --- Kaggle (competencia gemma-4-developer-agent) ---
 .kaggle.com
 .googleapis.com
+
+# --- arXiv + Semantic Scholar (papers) ---
+.arxiv.org
+api.semanticscholar.org
+
+# --- Wayback Machine (páginas bloqueadas) ---
+.archive.org
+
+# --- Hugging Face (pesos y datasets; incluye redirects a xethub) ---
+.huggingface.co
+.hf.co
+
+# --- Google AI Studio / Gemini (superficie del Studio y su login) ------------
+# Evidencia: la tabla de nombres de host de Google Workspace
+# (support.google.com/a/answer/9012184, actualizada el 2026-09-24) pone a
+# aistudio.google.com en la fila "Generative AI" y lista accounts.google.com y
+# www.google.com en autenticacion y cuentas; la lista de hosts de Gemini
+# (knowledge.workspace.google.com -> firewall-and-proxy-settings) agrega los
+# gstatic y los googleusercontent, y ahi Google los escribe como comodines
+# (*.gstatic.com, *.googleusercontent.com).
+#
+# OJO: la API de generacion NO necesita nada de esta seccion. Los hosts de la
+# API —generativelanguage.googleapis.com (Gemini con clave de AI Studio),
+# oauth2.googleapis.com y cloudcode-pa / cloudaicompanion / serviceusage de
+# Code Assist— caen todos bajo el `.googleapis.com` que ya esta arriba, en la
+# seccion de Kaggle. Esto agrega la SUPERFICIE del Studio y su login, nada mas.
+aistudio.google.com
+# Documentacion y referencia de la API: no esta en la tabla de firewall de
+# Google porque no es un endpoint de servicio, es el dominio de la doc publica.
+ai.google.dev
+# El login de Google: lo necesita el Studio y lo necesita gcloud/ADC.
+accounts.google.com
+www.google.com
+# Estaticos del Studio y avatares/media de la cuenta.
+.gstatic.com
+.googleusercontent.com
+
+# CDN con el que AI Studio sirve las apps que genera (los importmaps de
+# index.html). Solo hace falta si vas a correr o previsualizar esas apps: la
+# evidencia es el foro de AI Studio, no la tabla de firewall de Google, asi que
+# queda apagado. Descomentar si lo necesitas.
+# aistudiocdn.com

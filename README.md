@@ -119,6 +119,8 @@ lo que cambió y por qué:
    ROBOTINA_TELEGRAM_ALLOWED_USERS=        # opcional: quién puede usar el bot
    ROBOTINA_OPENCODE_SERVER_PASSWORD=      # opcional: HTTP Basic del server
    ROBOTINA_GITHUB_TOKEN=                  # opcional: PAT fine-grained
+   ROBOTINA_HF_TOKEN=                      # opcional: token de Hugging Face (gated)
+   ROBOTINA_GEMINI_API_KEY=                # opcional: clave de Google AI Studio
    ```
 
    Las dos claves de modelo se publican con nombres distintos a propósito:
@@ -318,6 +320,76 @@ Antes de agregar un host, preguntate si ese servicio necesita ver el tráfico de
 tu agente. La allowlist acota **a dónde** habla, no **qué** manda: ver «Puntos
 de atención» en `SECURITY.md`.
 
+## Hugging Face: el CLI hf y los repos gated
+
+La imagen hornea el cliente `hf` de Hugging Face. No es un release ni un asset
+npm: es el paquete de PyPI `huggingface_hub`, pineado con
+`ARG HUGGINGFACE_HUB_VERSION=2.0.0` en `robotina/Dockerfile`, instalado en un
+venv propio de la imagen (`/opt/hf`) con un symlink en `/usr/local/bin/hf`.
+`hf --version` imprime `2.0.0`.
+
+Es `huggingface_hub` y **no** el paquete `hf`: desde 2.0.0 el extra `[cli]` ya no
+existe y las ruedas del proyecto `hf` declaran `Dynamic: requires-dist`, que
+`uv` no resuelve. Un solo pin cubre la biblioteca y la CLI, que se versionan
+juntas; la vía de actualización es la común
+(`scripts/bump-tools.sh --write huggingface-hub`).
+
+**Credencial.** El `.env` acepta `ROBOTINA_HF_TOKEN` (opcional, default
+vacío) y compose lo publica al contenedor como `HF_TOKEN`, el nombre que lee
+`huggingface_hub`. No hay `hf auth login` ni archivo de credenciales: el CLI lee
+la variable de entorno.
+
+**El modelo puntuado de la competencia es un repo gated.**
+`google/gemma-4-31B-it-qat-w4a16-ct` exige que la cuenta del token **haya
+aceptado la licencia** en huggingface.co. Esa aceptación es un paso humano en
+el sitio, no algo que haga el stack. Sin token el CLI queda anónimo y Hugging
+Face responde 401/403 cuando lo usás; el arranque del stack no cambia.
+
+La sonda de solo lectura, cuando haya imagen reconstruida y contenedor recreado:
+
+```bash
+docker compose exec robotina hf download google/gemma-4-31B-it-qat-w4a16-ct --dry-run
+```
+
+Necesita un rebuild y un `--force-recreate`: la imagen que corre hoy no tiene el
+CLI. El egreso ya está habilitado: `.huggingface.co` y `.hf.co` están en
+`squid/allowlist.txt` (las descargas redirigen a `cas-bridge.xethub.hf.co`, que
+cae bajo `.hf.co`). Si la descarga falla con 401/403, el problema es el token o
+la licencia, no la allowlist.
+
+## Google AI Studio: la clave y el egreso
+
+El `.env` acepta `ROBOTINA_GEMINI_API_KEY` (opcional, default vacío) y compose
+la publica al contenedor como `GEMINI_API_KEY`, el nombre que documenta Google
+AI Studio. Sin clave no hay error de arranque: el stack levanta igual y el
+401/403 aparece recién cuando una herramienta usa la API.
+
+**Se publica un solo alias, a propósito.** La página de la API de Gemini
+(https://ai.google.dev/gemini-api/docs/api-key) dice que las bibliotecas cliente
+aceptan `GEMINI_API_KEY` o `GOOGLE_API_KEY` y que «If both are set,
+`GOOGLE_API_KEY` takes precedence»; el SDK lee `GOOGLE_API_KEY` primero y avisa
+cuando están las dos, y esa misma página recomienda definir una sola. Por eso
+acá solo llega `GEMINI_API_KEY`: una herramienta que espere `GOOGLE_API_KEY`
+tiene que aliasearla por su cuenta.
+
+**El egreso ya está habilitado.** La API de generación
+(`generativelanguage.googleapis.com`) cae bajo `.googleapis.com`, que ya estaba
+en `squid/allowlist.txt`, así que no hace falta agregar nada. Lo que la
+sección de Google AI Studio de la allowlist suma **encima** de eso es la
+superficie del Studio y su login: `aistudio.google.com`, `ai.google.dev`,
+`accounts.google.com`, `www.google.com`, `.gstatic.com` y
+`.googleusercontent.com`. `aistudiocdn.com` queda **comentado**: solo sirve las
+apps que AI Studio genera y la evidencia es de nivel foro, no la tabla de
+firewall de Google.
+
+**La clave la creás vos.** Crear la API key es un paso humano en AI Studio
+(aistudio.google.com); el repo nunca la crea ni la guarda.
+
+**Fuera de alcance.** Las variables no secretas de Vertex AI
+(`GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_GENAI_USE_VERTEXAI`) y
+el camino ADC (`GOOGLE_APPLICATION_CREDENTIALS`), que necesita un archivo de
+credenciales adentro del bind.
+
 ## Estado, volúmenes y persistencia
 
 Las dos bases SQLite usan WAL y viven en **volúmenes nativos de Docker,
@@ -371,11 +443,12 @@ Medido dentro de los contenedores que corren, no copiado de la documentación.
 | engram | 2.2.1 | release, con checksum |
 | gentle-ai | 3.1.0 | release, con checksum |
 | taplo / marksman / codegraph | 0.10.0 / 2026-02-08 / 1.5.0 | releases pineadas por tag |
+| hf (huggingface_hub) | 2.0.0 | paquete de PyPI pineado por `ARG` en `robotina/Dockerfile` |
 
 `robotina/Dockerfile` pinea la versión de opencode, gh, taplo, marksman,
-codegraph, engram, gentle-ai y los paquetes npm, y **verifica por checksum las
-descargas que lo exponen**. marksman va por tag de release, sin verificación de
-integridad. Lo demás se resuelve al construir (tags `latest` y `apk` sin
+codegraph, engram, gentle-ai, hf y los paquetes npm, y **verifica por checksum
+las descargas que lo exponen**. marksman va por tag de release, sin verificación
+de integridad. Lo demás se resuelve al construir (tags `latest` y `apk` sin
 versión), así que **estas versiones describen la imagen medida, no una garantía
 a futuro**: para auditar una versión concreta hay que volver a medirla en el
 contenedor.
@@ -383,8 +456,8 @@ contenedor.
 ### Actualizar las herramientas horneadas
 
 La única vía soportada para toda herramienta que el Dockerfile fija con un `ARG`
-(engram, gentle-ai, marksman, gh, taplo y opencode-ai) es reescribir el pin y
-reconstruir:
+(engram, gentle-ai, marksman, gh, taplo, opencode-ai y huggingface-hub) es
+reescribir el pin y reconstruir:
 
 ```sh
 scripts/bump-tools.sh --check          # qué pin quedó atrás
@@ -407,7 +480,7 @@ El healthcheck compara la versión que **corre** contra el pin que la imagen
 publicó, y falla si una copia en el HOME del agente (`/opt/data/.local/bin`, que
 precede a `/usr/local/bin` en el `PATH`) ensombrece el binario horneado. Ese
 chequeo cubre hoy a `engram` y `gentle-ai`, las dos herramientas que publican pin;
-`marksman`, `opencode-ai`, `gh` y `taplo` todavía no lo tienen.
+`marksman`, `opencode-ai`, `gh`, `taplo` y `hf` todavía no lo tienen.
 
 ## Modelo de seguridad, en cinco líneas
 

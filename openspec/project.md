@@ -26,7 +26,7 @@ not "nothing happens" but **bounded blast radius**.
 
 | Service | Image | Notes |
 | --- | --- | --- |
-| `robotina` | `robotina:local` (built from `robotina/Dockerfile` over the vendor base) | The merged agent. Runs **s6-overlay as PID 1** (so no `init: true`), app uid 10000, `cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]` (six capabilities, bounding mask `0xeb`). Hosts `opencode serve` on loopback, `engram`, and the Hermes Telegram gateway as s6 services. Carries the OpenCode toolchain (node/npm, uv + Python 3.13, R + `languageserver`, `gh`, engram, gentle-ai, codegraph, six LSP servers) plus `git`/`curl`/`python3`. Has `gh` **and** `GITHUB_TOKEN` (the retired "Hermes has no GitHub credential" invariant stays retired). |
+| `robotina` | `robotina:local` (built from `robotina/Dockerfile` over the vendor base) | The merged agent. Runs **s6-overlay as PID 1** (so no `init: true`), app uid 10000, `cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]` (six capabilities, bounding mask `0xeb`). Hosts `opencode serve` on loopback, `engram`, and the Hermes Telegram gateway as s6 services. Carries the OpenCode toolchain (node/npm, uv + Python 3.13, R + `languageserver`, `gh`, `hf`, engram, gentle-ai, codegraph, six LSP servers) plus `git`/`curl`/`python3`. Has `gh` **and** `GITHUB_TOKEN`, plus `hf` and `HF_TOKEN` (Hugging Face gated repos); the retired "Hermes has no GitHub credential" invariant stays retired. |
 | `egress-proxy` | `ubuntu/squid:latest` | Sole container with Internet egress. uid 13, read-only rootfs, tmpfs for logs/cache. **Stays separate** — not part of the merge. |
 
 ## Networks and persistence

@@ -139,6 +139,8 @@ ROBOTINA_OPENCODE_MODEL_KEY= # clave del proveedor que usa OpenCode
 ROBOTINA_TELEGRAM_ALLOWED_USERS=   # allowlist de usuarios de Telegram (ver abajo)
 ROBOTINA_OPENCODE_SERVER_PASSWORD= # HTTP Basic del server de opencode (defensa en profundidad)
 ROBOTINA_GITHUB_TOKEN=             # PAT fine-grained; ver «Autenticación de GitHub»
+ROBOTINA_HF_TOKEN=                 # token de Hugging Face (repos gated)
+ROBOTINA_GEMINI_API_KEY=           # clave de Google AI Studio (se publica como GEMINI_API_KEY)
 
 # Modelo de Hermes (no son secretos; ver «Modelo y plan del proveedor»)
 ROBOTINA_HERMES_MODEL_PROVIDER=    # proveedor (default opencode-go)
@@ -211,9 +213,21 @@ APIs de Google (`*.googleapis.com`), no el endpoint puntual de un servicio. Se a
 competencia de Kaggle y se mantiene **a propósito** como riesgo residual aceptado por decisión
 del owner (2026-09-27). No se propone acotarla.
 
+La misma excepción ya cubre los hosts de la API de Gemini —`generativelanguage.googleapis.com`
+y los de Code Assist (`oauth2.googleapis.com`, `cloudcode-pa.googleapis.com`,
+`cloudaicompanion.googleapis.com`, `serviceusage.googleapis.com`)—: todos caen bajo
+`.googleapis.com`. Lo que la sección de Google AI Studio agrega **encima** de eso es la
+superficie del Studio y su login: `aistudio.google.com`, `ai.google.dev`,
+`accounts.google.com`, `www.google.com`, `.gstatic.com` y `.googleusercontent.com`.
+`aistudiocdn.com` queda **comentado**: solo sirve las apps que AI Studio genera y la evidencia
+es de nivel foro, no la tabla de firewall de Google. Evidencia de las entradas habilitadas: la
+tabla de nombres de host de Google Workspace
+(https://support.google.com/a/answer/9012184, actualizada el 2026-09-24) y la lista de hosts de
+Gemini (https://knowledge.workspace.google.com/admin/security/firewall-and-proxy-settings).
+
 ## Rotación de credenciales
 
-Seis credenciales sostienen el stack. Ninguna se imprime nunca: este documento las nombra por
+Ocho credenciales sostienen el stack. Ninguna se imprime nunca: este documento las nombra por
 variable o por ruta, jamás por valor.
 
 ### Inventario
@@ -222,6 +236,8 @@ variable o por ruta, jamás por valor.
 | --- | --- | --- |
 | `ROBOTINA_TELEGRAM_BOT_TOKEN` | `.env` del repo | token emitido por @BotFather |
 | `ROBOTINA_GITHUB_TOKEN` | `.env` del repo | PAT fine-grained de GitHub |
+| `ROBOTINA_HF_TOKEN` | `.env` del repo | token de Hugging Face; se publica al contenedor como `HF_TOKEN` (repo gated `google/gemma-4-31B-it-qat-w4a16-ct`) |
+| `ROBOTINA_GEMINI_API_KEY` | `.env` del repo | clave de API de Google AI Studio; se publica al contenedor como `GEMINI_API_KEY` |
 | `ROBOTINA_HERMES_MODEL_KEY` | `.env` del repo | clave del proveedor; se publica al proceso Hermes como `OPENCODE_GO_API_KEY` |
 | `ROBOTINA_OPENCODE_MODEL_KEY` | `.env` del repo | clave del proveedor; se publica como `ROBOTINA_OPENCODE_GO_API_KEY` y el `run` de s6 la reexporta como `OPENCODE_GO_API_KEY` **solo** dentro del proceso del server de opencode |
 | `ROBOTINA_OPENCODE_SERVER_PASSWORD` | `.env` del repo | HTTP Basic del server de opencode (loopback) |
@@ -258,11 +274,15 @@ variable o por ruta, jamás por valor.
 De la menos acoplada a la más acoplada, una por vez y con verificación entre cada una:
 
 1. Kaggle (`${HOST_DATA_DIR}/hermes/.kaggle/access_token`).
-2. `ROBOTINA_OPENCODE_SERVER_PASSWORD`.
-3. `ROBOTINA_OPENCODE_MODEL_KEY`.
-4. `ROBOTINA_HERMES_MODEL_KEY`.
-5. `ROBOTINA_GITHUB_TOKEN` (PAT).
-6. `ROBOTINA_TELEGRAM_BOT_TOKEN`.
+2. `ROBOTINA_HF_TOKEN` (token de Hugging Face; es independiente y su ausencia nunca rompe el
+   arranque).
+3. `ROBOTINA_GEMINI_API_KEY` (clave de Google AI Studio; es independiente y su ausencia nunca
+   rompe el arranque).
+4. `ROBOTINA_OPENCODE_SERVER_PASSWORD`.
+5. `ROBOTINA_OPENCODE_MODEL_KEY`.
+6. `ROBOTINA_HERMES_MODEL_KEY`.
+7. `ROBOTINA_GITHUB_TOKEN` (PAT).
+8. `ROBOTINA_TELEGRAM_BOT_TOKEN`.
 
 ### Reglas permanentes
 
@@ -874,6 +894,10 @@ si alguna vez regenerás la config con `hermes setup`, hay que volver a aplicarl
   serio.
 - **Nombres de red.** La red con salida se llama `egress` (antes `agent_internet`). Si quedó la
   vieja: `docker network rm agent_internet`.
+- **`HF_TOKEN` y `GEMINI_API_KEY` son alcanzables por todo el contenedor y legibles con un
+  `docker inspect` acotado**, exactamente igual que el PAT: mismo uid (10000), sin aislamiento
+  por proceso. Por eso el token de Hugging Face que se usa acá es un token de **LECTURA** del
+  repo gated, nunca uno de escritura.
 
 ## Fuera de alcance (siguientes pasos)
 
