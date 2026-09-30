@@ -155,6 +155,15 @@ services:
       # Telegram ahora comparte contenedor con este token, y el token es legible
       # con `docker inspect`.
       GITHUB_TOKEN: ${ROBOTINA_GITHUB_TOKEN:-}
+      # Token de Hugging Face (#85): el CLI `hf` lo lee de aca con el nombre
+      # exacto del vendor, sin `hf auth login`. Es para repos GATED
+      # (google/gemma-4-31B-it-qat-w4a16-ct): el token tiene que ser de una
+      # cuenta que YA acepto la licencia en huggingface.co, y el egreso necesita
+      # .huggingface.co y .hf.co en squid/allowlist.txt. Vacio (default) = el CLI
+      # queda anonimo y el 401/403 de HF se ve al usarlo, pero el arranque del
+      # stack no cambia. Mismo riesgo asumido que el PAT: legible con
+      # `docker inspect`.
+      HF_TOKEN: ${ROBOTINA_HF_TOKEN:-}
       # Modelo de Hermes (NO son secretos). Los consume el cont-init
       # 30-robotina-model, que apunta `config.yaml` a este proveedor, endpoint y
       # modelo. Si no se definen en .env, se usan los defaults entre parentesis.
