@@ -350,28 +350,32 @@ compose publishes it to the container as `HF_TOKEN`, the name `huggingface_hub`
 reads. There is no `hf auth login` and no credentials file: the CLI reads the
 environment variable.
 
-**The competition's scored model is a gated repo in the CLI's support sense,
-public today.** Measured 2026-09-30, with no credential involved, the API
+**The competition's scored model is public today: the API answers
+`"gated": false`.** Measured 2026-09-30, with no credential involved, the API
 answers anonymously `"gated": false` and `"private": false` for
 `google/gemma-4-31B-it-qat-w4a16-ct`, so the weights are readable without a
-token today. The token stays wired and is still worth setting: the repository
-owner can turn a gate on at any time and the licence terms still apply. While
-the gate is off **there is nothing to accept on huggingface.co**.
+token today. The CLI does support gated repos, and the token stays wired and is
+still worth setting: the repository owner can turn a gate on at any time and
+the licence terms still apply. While the gate is off **there is nothing to
+accept on huggingface.co**.
 
 The read-only probe, with the image rebuilt and the container recreated with
 `ROBOTINA_HF_TOKEN` set:
 
 ```bash
 docker compose exec robotina sh -c \
-  'curl -fsS -m 30 -o /dev/null -r 0-100 \
+  'curl -fsSL -m 30 -o /dev/null -r 0-100 \
    -H "Authorization: Bearer $HF_TOKEN" \
    https://huggingface.co/google/gemma-4-31B-it-qat-w4a16-ct/resolve/main/model.safetensors && echo "acceso ok"'
 ```
 
 The `-f` is what makes it able to fail: it turns a 4xx/5xx into a non-zero exit
 status, and a bare `curl` exits `0` on a 4xx — that is the trap. `-r 0-100`
-bounds the read to 100 bytes, never GBs, and the request exercises the redirect
-to the CDN, so the probe is also the egress proof.
+bounds the read to 100 bytes, never GBs. `-L` is what makes it touch the CDN,
+measured: without `-L` curl stops at the 302 and downloads the redirect body
+(about 1 KB) instead of the weights; with `-L` it reads real bytes of the file
+(`206`, 101 bytes) and therefore also proves egress — the proxy log shows the
+tunnel to `us.aws.cdn.hf.co`.
 
 `hf download … --dry-run` is **not an access probe**: measured with and without
 a token it exits `0` in both cases because it only lists the repo's public file
@@ -380,9 +384,12 @@ is not updated from inside the container, it arrives with a rebuild.
 
 Egress is already enabled: `.huggingface.co` and `.hf.co` are in
 `squid/allowlist.txt`, and the download host measured on 2026-09-30 is
-`us.aws.cdn.hf.co`, of the xet-bridge family that `.hf.co` covers. A 401/403
-from Hugging Face means a gate appeared or the token expired / lacks the read
-scope, never that the allowlist is missing something.
+`us.aws.cdn.hf.co`, of the xet-bridge family that `.hf.co` covers. The probe
+catches a 4xx/5xx —a gate that blocks, a path that does not exist— and, with
+`-L`, a CDN host missing from the allowlist. What it does **not** catch is an
+invalid token: while the repo is public, measured, a bogus bearer also receives
+`206`, so the probe proves the bytes are reachable, not that the credential is
+valid.
 
 ## Google AI Studio: the key and egress
 

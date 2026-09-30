@@ -219,10 +219,10 @@ y los de Code Assist (`oauth2.googleapis.com`, `cloudcode-pa.googleapis.com`,
 `.googleapis.com`. Lo que la sección de Google AI Studio agrega **encima** de eso es la
 superficie del Studio y su login: `aistudio.google.com`, `ai.google.dev`,
 `accounts.google.com`, `www.google.com`, `.gstatic.com` y `.googleusercontent.com`.
-`aistudiocdn.com` queda **habilitado** tambien: es el CDN con el que AI Studio sirve las apps que
-genera (los importmaps de su `index.html`), asi que sin el la previsualizacion queda en blanco.
-La evidencia de que hace falta es de nivel foro, no la tabla de firewall de Google, y el dueno del
-repo lo pidio en #87. Evidencia de las demas entradas habilitadas: la
+`aistudiocdn.com` queda **habilitado** también: es el CDN con el que AI Studio sirve las apps que
+genera (los importmaps de su `index.html`), así que sin él la previsualización queda en blanco.
+La evidencia de que hace falta es de nivel foro, no la tabla de firewall de Google, y el dueño del
+repo lo pidió en #87. Evidencia de las demás entradas habilitadas: la
 tabla de nombres de host de Google Workspace
 (https://support.google.com/a/answer/9012184, actualizada el 2026-09-24) y la lista de hosts de
 Gemini (https://knowledge.workspace.google.com/admin/security/firewall-and-proxy-settings).
@@ -901,8 +901,8 @@ si alguna vez regenerás la config con `hermes setup`, hay que volver a aplicarl
   por proceso. Por eso el token de Hugging Face que se usa acá es un token de **LECTURA**,
   nunca uno de escritura. Medido el 2026-09-30, el repo objetivo reporta `"gated": false` en
   anónimo: hoy no hay nada que aceptar en huggingface.co, y un `401`/`403` de Hugging Face
-  significa que apareció un gate o que el token venció / no tiene el scope de lectura, nunca
-  que falte una entrada en la allowlist.
+  significa que apareció un gate, nunca que falte una entrada en la allowlist. Mientras el repo
+  siga público, un token inválido no se detecta: medido, un bearer de basura también recibe `206`.
 
 ## Fuera de alcance (siguientes pasos)
 

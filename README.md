@@ -339,29 +339,32 @@ vacío) y compose lo publica al contenedor como `HF_TOKEN`, el nombre que lee
 `huggingface_hub`. No hay `hf auth login` ni archivo de credenciales: el CLI lee
 la variable de entorno.
 
-**El modelo puntuado de la competencia es un repo gated para el soporte del
-CLI, público hoy.** Medido el 2026-09-30, sin credencial de por medio, la API
-responde en anónimo `"gated": false` y `"private": false` para
+**El modelo puntuado de la competencia es público hoy: la API responde
+`"gated": false`.** Medido el 2026-09-30, sin credencial de por medio, la API
+devuelve en anónimo `"gated": false` y `"private": false` para
 `google/gemma-4-31B-it-qat-w4a16-ct`, así que los pesos se leen sin token hoy.
-El token sigue cableado y conviene definirlo igual: el dueño del repositorio
-puede activar el gate en cualquier momento y los términos de la licencia siguen
-aplicando. Mientras el gate esté apagado **no hay nada que aceptar en
-huggingface.co**.
+El CLI sí soporta repos gated, y el token sigue cableado y conviene definirlo
+igual: el dueño del repositorio puede activar el gate en cualquier momento y
+los términos de la licencia siguen aplicando. Mientras el gate esté apagado
+**no hay nada que aceptar en huggingface.co**.
 
 La sonda de solo lectura, con la imagen reconstruida y el contenedor recreado
 con `ROBOTINA_HF_TOKEN` definido:
 
 ```bash
 docker compose exec robotina sh -c \
-  'curl -fsS -m 30 -o /dev/null -r 0-100 \
+  'curl -fsSL -m 30 -o /dev/null -r 0-100 \
    -H "Authorization: Bearer $HF_TOKEN" \
    https://huggingface.co/google/gemma-4-31B-it-qat-w4a16-ct/resolve/main/model.safetensors && echo "acceso ok"'
 ```
 
 El `-f` es lo que la hace poder fallar: convierte un 4xx/5xx en un exit status
 distinto de cero, y un `curl` pelado sale `0` ante un 4xx — esa es la trampa.
-`-r 0-100` acota la lectura a 100 bytes, nunca GBs, y el pedido ejercita el
-redirect al CDN, así que la sonda es también la prueba de egreso.
+`-r 0-100` acota la lectura a 100 bytes, nunca GBs. `-L` es lo que la hace tocar
+el CDN, medido: sin `-L` el `curl` se detiene en el 302 y baja el cuerpo del
+redirect (alrededor de 1 KB) en vez de los pesos; con `-L` lee bytes reales del
+archivo (`206`, 101 bytes) y por eso es también la prueba de egreso: el log del
+proxy muestra el túnel a `us.aws.cdn.hf.co`.
 
 `hf download … --dry-run` **no es una sonda de acceso**: medido con y sin token,
 sale `0` en los dos casos porque solo lista el inventario público de archivos
@@ -370,9 +373,12 @@ imagen: no se actualiza desde adentro del contenedor, llega con un rebuild.
 
 El egreso ya está habilitado: `.huggingface.co` y `.hf.co` están en
 `squid/allowlist.txt`, y el host de descarga medido el 2026-09-30 es
-`us.aws.cdn.hf.co`, de la familia xet-bridge que `.hf.co` cubre. Un 401/403 de
-Hugging Face significa que apareció un gate o que el token venció / no tiene el
-scope de lectura, nunca que falte algo en la allowlist.
+`us.aws.cdn.hf.co`, de la familia xet-bridge que `.hf.co` cubre. La sonda
+detecta un 4xx/5xx —un gate que bloquea, una ruta que no existe— y, con `-L`,
+que el host del CDN falte en la allowlist. Lo que **no** detecta es la validez
+de la credencial: mientras el repo sea público, medido, un bearer de basura
+también recibe `206`, así que la sonda prueba que los bytes son alcanzables, no
+que el token sirva.
 
 ## Google AI Studio: la clave y el egreso
 
@@ -395,10 +401,10 @@ en `squid/allowlist.txt`, así que no hace falta agregar nada. Lo que la
 sección de Google AI Studio de la allowlist suma **encima** de eso es la
 superficie del Studio y su login: `aistudio.google.com`, `ai.google.dev`,
 `accounts.google.com`, `www.google.com`, `.gstatic.com` y
-`.googleusercontent.com`. `aistudiocdn.com` tambien esta **habilitado**: es el CDN con el que
-AI Studio sirve las apps que genera (los importmaps de su `index.html`), asi que sin el la
-previsualizacion queda en blanco. La evidencia de que hace falta es el foro de AI Studio, no la
-tabla de firewall de Google; lo pidio el dueno del repo en #87.
+`.googleusercontent.com`. `aistudiocdn.com` también está **habilitado**: es el CDN con el que
+AI Studio sirve las apps que genera (los importmaps de su `index.html`), así que sin él la
+previsualización queda en blanco. La evidencia de que hace falta es el foro de AI Studio, no la
+tabla de firewall de Google; lo pidió el dueño del repo en #87.
 
 **La clave la creás vos.** Crear la API key es un paso humano en AI Studio
 (aistudio.google.com); el repo nunca la crea ni la guarda.

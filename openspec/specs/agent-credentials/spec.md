@@ -510,33 +510,41 @@ NOT be documented as gated while the API reports otherwise.
 #### Scenario: The repo's gating status is reported as measured
 
 - GIVEN the change is applied
-- WHEN the credential's documentation is searched for the model id and for the measured status
-- THEN the model id is named in all three files and the measured status appears where the credential is
-  described
-- PROOF: `grep -n "gemma-4-31B-it-qat-w4a16-ct" README.md README.en.md SECURITY.md`
-  (non-empty in all three) together with `grep -rn '"gated": false' README.md SECURITY.md`
-  (non-empty in both; measured 2026-09-30, anonymous)
-- NOTE: the previous version of this scenario asserted the presence of the word "gated", which is what let
-  the false claim into PR #86. The assertion now names the model id plus the measured status, so a document
-  that calls the repository gated while the API says otherwise fails it. `README.md` and `README.en.md`
-  carry both the measured status and the access probe; `SECURITY.md` records the same status next to the
-  `HF_TOKEN` inventory row and in "Puntos de atención".
+- WHEN the three documents are searched for the measured status and the two READMEs for the documented
+  access probe
+- THEN all three record the measured `"gated": false` status where the credential is described, and both
+  READMEs document the ranged `-L` probe
+- PROOF: `test "$(grep -c '"gated": false' README.md README.en.md SECURITY.md | grep -c ':0$')" -eq 0`
+  (exits `0` only when all three documents report at least one `"gated": false`; a single `0` in any file
+  fails it) together with
+  `test "$(grep -c 'curl -fsSL' README.md README.en.md | grep -c ':0$')" -eq 0`
+  (exits `0` only when both READMEs document the ranged `-L` probe; a single `0` fails it)
+- NOTE: the recipes assert exactly two properties — the measured status is recorded in all three documents
+  and the documented access probe is the ranged `curl -fsSL` — and nothing more. The previous version named
+  the model id as a substring, which matched inside the probe URL and degenerated to "the string appears
+  somewhere", and searched the status with `grep -rn` over only `README.md` and `SECURITY.md`, so a bilingual
+  desync in `README.en.md` passed; these recipes close both gaps.
 
 #### Scenario: The access probe fails loudly when there is no access
 
 - GIVEN the image is rebuilt and the container is recreated with `ROBOTINA_HF_TOKEN` set
-- WHEN the probe reads a bounded byte range of the weights through the proxy
-- THEN a 4xx or 5xx from Hugging Face turns into a non-zero exit status
+- WHEN the probe reads a bounded byte range of the weights through the proxy, first through Hugging Face and
+  then, following the redirect, through the download CDN
+- THEN the ranged read returns bytes from the CDN host (measured 2026-09-30: `206`, 101 bytes, proxy tunnel
+  to `us.aws.cdn.hf.co`) and a 4xx or 5xx turns into a non-zero exit status
 - PROOF:
-  `docker compose exec robotina sh -c 'curl -fsS -m 30 -o /dev/null -r 0-100 -H "Authorization: Bearer $HF_TOKEN" https://huggingface.co/google/gemma-4-31B-it-qat-w4a16-ct/resolve/main/model.safetensors && echo "acceso ok"'`
-  (prints `acceso ok` on success; non-zero exit on a gate, an expired token or a missing allowlist entry)
-- NOTE: `hf download <repo> --dry-run` is NOT this probe: measured with and without a token it exits `0` in
-  both cases because it only lists the repo's public file inventory, so a green run is not evidence of
-  access — do not reintroduce it as an access check. A bare `curl` also exits `0` on a 4xx, which is the
-  trap `-f` closes. The ranged read needs no weight download (`-r 0-100` reads 100 bytes, never GBs) and it
-  exercises the redirect to the download CDN, so it doubles as the egress proof for the `.hf.co` allowlist
-  entry; the download host measured on 2026-09-30 is `us.aws.cdn.hf.co`, which falls under the same
-  `.hf.co` family.
+  `docker compose exec robotina sh -c 'curl -fsSL -m 30 -o /dev/null -r 0-100 -H "Authorization: Bearer $HF_TOKEN" https://huggingface.co/google/gemma-4-31B-it-qat-w4a16-ct/resolve/main/model.safetensors && echo "acceso ok"'`
+  (prints `acceso ok` on success; a 4xx or 5xx — a gate that blocks or a missing path — exits non-zero, and
+  the same shape against `resolve/main/no-existe.json` measured exit `22`)
+- NOTE: `-L` is what makes the probe touch the CDN: measured without it, curl stops at the `302` and downloads
+  the redirect body instead of the weights, so a probe without `-L` is a false green. `hf download <repo>
+  --dry-run` is NOT this probe either: measured with and without a token it exits `0` in both cases because it
+  only lists the repo's public file inventory. A bare `curl` also exits `0` on a 4xx, which is the trap `-f`
+  closes. The probe tests that the bytes are reachable, **not** credential validity: while the API reports the
+  repository as public, measured, a bogus bearer also receives `206`, so an expired or scope-less token is not
+  detected — what it does catch is a 4xx/5xx and, with `-L`, a CDN host missing from the allowlist. The ranged
+  read needs no weight download (`-r 0-100` reads 100 bytes, never GBs); the download host measured on
+  2026-09-30 is `us.aws.cdn.hf.co`, which falls under the same `.hf.co` family.
 
 ### Requirement: CR12 — The Google AI Studio key reaches the container under the name AI Studio documents
 
