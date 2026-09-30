@@ -56,7 +56,7 @@ Branch: `fix/issue-79-delegate-budget-resume`, off `main`. Owner: `emiliodavola`
 - [x] T5 — Verification: `sh -n`, `--help`, the OD12 proofs (exit `4` carries the hint; the advisory
       fires exactly once; stdout clean), `docker compose config -q`; independent read-only verifier
       over the diff and the spec assertions.
-- [ ] T6 — Commit per work unit, push, PR against `main` assigned to the owner.
+- [x] T6 — Commit per work unit, push, PR against `main` assigned to the owner: **PR #82**.
 
 ## Verification (independent, read-only)
 
