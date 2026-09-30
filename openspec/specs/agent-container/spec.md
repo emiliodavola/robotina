@@ -512,15 +512,16 @@ sourced from the same `ARG`) and the container healthcheck SHALL compare the ver
 binary reports against the published pin **and** require `command -v <tool>` to resolve to the image's
 own copy in `/usr/local/bin`. The build publishes the pin; the healthcheck detects drift.
 
-The scope is deliberately bounded, not universal. The Dockerfile pins **six** tools through an `ARG`
+The scope is deliberately bounded, not universal. The Dockerfile pins **seven** tools through an `ARG`
 (`ENGRAM_VERSION`, `GENTLE_AI_VERSION`, `MARKSMAN_RELEASE`, `OPENCODE_VERSION`, `GH_VERSION`,
-`TAPLO_VERSION`), but only `engram` and `gentle-ai` publish a `ROBOTINA_*_VERSION` pin and are checked
-by the healthcheck. The other four (`marksman`, `opencode-ai`, `gh`, `taplo`) are **not** covered yet;
+`TAPLO_VERSION`, `HUGGINGFACE_HUB_VERSION`), but only `engram` and `gentle-ai` publish a
+`ROBOTINA_*_VERSION` pin and are checked
+by the healthcheck. The other five (`marksman`, `opencode-ai`, `gh`, `taplo`, `hf`) are **not** covered yet;
 extending the invariant to them is a follow-up, not part of this change. This requirement SHALL NOT be
 read as a general obligation the repository already meets.
 
 Measured origin (#74): `gentle-ai` was the **shadow-prone** tool left without the invariant — `engram`
-already carried it (AC11), and the remaining four are not covered at all.
+already carried it (AC11), and the remaining five are not covered at all.
 `ROBOTINA_GENTLE_AI_VERSION` was **unset** in the running container while `ARG GENTLE_AI_VERSION=3.1.0`
 was baked; `/usr/local/bin` is `root:root` mode 755 and the s6 services run as `hermes` (uid 10000),
 so `gentle-ai`'s in-container self-upgrade can never succeed — it stages `<binary>.new` beside the
@@ -534,15 +535,15 @@ loud, not patching the updater.
 
 - GIVEN the change is applied
 - WHEN the Dockerfile's pins are counted
-- THEN exactly two `ENV ROBOTINA_*_VERSION` lines exist (`engram` and `gentle-ai`), while all six
+- THEN exactly two `ENV ROBOTINA_*_VERSION` lines exist (`engram` and `gentle-ai`), while all seven
   ARG-pinned tools are present — adding a third pin or dropping one of the two FAILS this proof, so
   the requirement's claim cannot silently drift from the implementation
 - PROOF:
   `grep -cE '^ENV ROBOTINA_[A-Z_]+_VERSION=' robotina/Dockerfile` (must be exactly 2) together with
   `grep -nE '^ENV ROBOTINA_(ENGRAM|GENTLE_AI)_VERSION=' robotina/Dockerfile` (must list exactly the
   `ROBOTINA_ENGRAM_VERSION` and `ROBOTINA_GENTLE_AI_VERSION` lines) and
-  `grep -nE '^ARG (ENGRAM_VERSION|GENTLE_AI_VERSION|MARKSMAN_RELEASE|OPENCODE_VERSION|GH_VERSION|TAPLO_VERSION)=' robotina/Dockerfile`
-  (must list all six ARG-pinned tools; the four without a matching `ENV` are the uncovered follow-up)
+  `grep -nE '^ARG (ENGRAM_VERSION|GENTLE_AI_VERSION|MARKSMAN_RELEASE|OPENCODE_VERSION|GH_VERSION|TAPLO_VERSION|HUGGINGFACE_HUB_VERSION)=' robotina/Dockerfile`
+  (must list all seven ARG-pinned tools; the five without a matching `ENV` are the uncovered follow-up)
 
 #### Scenario: The healthcheck passes when the pin matches
 
@@ -596,8 +597,9 @@ published-pin scope stays exactly `engram` and `gentle-ai`.
 
 Measured: the step runs `uv venv --python 3.13 /opt/hf`, `uv pip install --python /opt/hf/bin/python
 "huggingface_hub==${HUGGINGFACE_HUB_VERSION}"`, `ln -sf /opt/hf/bin/hf /usr/local/bin/hf`, then
-`hf --version | grep -F "${HUGGINGFACE_HUB_VERSION}"`. The version output goes to stdout and the `hf-cli`
-skill's advice to stderr, so the assertion reads stdout on purpose: the warning cannot satisfy it.
+`hf --version | grep -F "${HUGGINGFACE_HUB_VERSION}"`. The assertion reads stdout on purpose because that
+is where `hf --version` prints the version, and an `hf-cli` skill hint that was measured once on stderr in a
+scratch container does NOT reproduce in the built image (measured: stderr empty), so nothing depends on it.
 
 NOTE: the reason this is a venv and not `uv tool install` is that `UV_TOOL_DIR` and `UV_TOOL_BIN_DIR` point
 inside the `/opt/data` host bind (`/opt/data/.local/share/uv-tools` and `/opt/data/.local/bin`), so anything

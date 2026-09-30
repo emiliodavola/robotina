@@ -266,9 +266,10 @@ ENV PATH=$PATH:/opt/uv/bin
 #     CPython administrado por uv que hornea el paso 6; su volumen nativo se
 #     siembra desde la imagen, asi que el enlace sigue valido en runtime.
 #
-#   El `hf --version` de la asercion imprime `2.0.0` en stdout y deja en stderr
-#     el aviso de la skill `hf-cli`. El grep va contra stdout a proposito: el
-#     aviso no puede satisfacer la asercion.
+#   El grep de la asercion lee stdout a proposito: ahi imprime `hf --version` la
+#     version, y nada de stderr puede satisfacerla. (El aviso de la skill
+#     `hf-cli` que se midio una vez en stderr NO se reproduce en la imagen
+#     horneada: no se depende de el.)
 RUN set -eux; \
     uv venv --python 3.13 /opt/hf; \
     uv pip install --python /opt/hf/bin/python "huggingface_hub==${HUGGINGFACE_HUB_VERSION}"; \

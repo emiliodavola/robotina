@@ -497,8 +497,9 @@ stack SHALL NOT claim to perform it.
   (no output, exit non-zero)
 - NOTE: this recipe is deliberately **change-set scoped**. CR4's repo-wide
   `…(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=.+` matches value-less documentation
-  placeholders such as `ROBOTINA_GITHUB_TOKEN=      # comment`, so it reports hits on `main` today
-  (measured: 7 hits); that over-broad class is already recorded at
+  placeholders such as `ROBOTINA_GITHUB_TOKEN=      # comment`, so it reports 34 hits on `main` today
+  (measured, of which 7 are that value-less placeholder subclass); that over-broad class is already
+  recorded at
   `odd/tasks/single-robotina-container.md:501-506`. CR4 is NOT changed by this requirement — this recipe
   exists so that a change can prove its own cleanliness without waiting on that repair.
 

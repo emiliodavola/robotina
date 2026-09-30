@@ -56,8 +56,10 @@ are called out because they change the recipe.
    `2.0.0` (all three: no solution).
 4. **`huggingface_hub` itself is installable at 2.0.0 and already ships the `hf` console script.**
    Measured: `uv venv --python 3.13 /opt/hf && uv pip install huggingface_hub==2.0.0` yields
-   `/opt/hf/bin/hf`, and `hf --version` prints `2.0.0\n` on stdout (plus a `hf-cli` skill hint on
-   stderr). `huggingface-cli` is gone in 2.0.0 — `hf` is the only entry point.
+   `/opt/hf/bin/hf`, and `hf --version` prints `2.0.0\n` on stdout. A `hf-cli` skill hint showed up on
+   stderr in that first scratch container and did NOT reproduce in the built image (independently
+   measured: stderr empty), so nothing depends on it. `huggingface-cli` is gone in 2.0.0 — `hf` is the
+   only entry point.
    Contrast measured on `huggingface_hub==1.33.0`: `hf --version` prints only updater and skill
    hints, no version line — unusable as a pin assertion.
 5. **Therefore the pin is `huggingface_hub==2.0.0`, not the `hf` distribution.** One pin covers the
@@ -98,9 +100,20 @@ are called out because they change the recipe.
 12. **CR4's repo-wide secret recipe is over-broad and already red on `main`.** Measured:
     `git grep -nE '(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=.+' -- ':!*.example'`
     matches value-less documentation placeholders such as
-    `ROBOTINA_GITHUB_TOKEN=      # comment` (7 hits on `main`, and the class is already recorded at
-    `odd/tasks/single-robotina-container.md:501-506`). CR4 is not changed here; CR11 and CR12 prove
-    their own cleanliness with a change-set-scoped recipe.
+    `ROBOTINA_GITHUB_TOKEN=      # comment`: **34 hits on `main`**, of which 7 are that placeholder
+    subclass, and the class is already recorded at
+    `odd/tasks/single-robotina-container.md:501-506`. CR4 is not changed here; CR11 and CR12 prove their
+    own cleanliness with a change-set-scoped recipe. The branch takes that count to 36 — the two extra
+    hits are the spec's NOTE and this item literally quoting the over-broad pattern, which is the same
+    "the proof line reports itself" effect CR4's own NOTE describes.
+13. **The independent verifier found three real drifts, all fixed in this branch.** (a) *Medium*: AC13's
+    prose still said "six" ARG-pinned tools and "the other four" uncovered — the new `ARG` makes it
+    seven/five, so AC13's counts (and its PROOF's alternation) were amended while its invariant stayed
+    untouched. (b) *Low*: the Dockerfile comment, AC14 and this tracker asserted an `hf-cli` hint on
+    stderr that does not reproduce in the built image — the claim is gone and only the true part (the
+    assertion reads stdout) remains. (c) *Low*: the "7 hits" figure quoted for CR4's recipe was the
+    placeholder subclass, not the total (34) — corrected here and in CR11's NOTE. The verifier could not
+    falsify any of the other seven claims it attacked.
 
 ## Shape
 
@@ -168,10 +181,10 @@ recreated container, or the owner's hand edit.
 | The venv is not a mount target | `MSYS_NO_PATHCONV=1 git grep -n '/opt/hf' -- robotina/Dockerfile` + `git grep -n 'target: /opt/hf' -- compose.yml` | 5 matches / no output |
 | No secret value is committed | `git diff main...HEAD \| grep -nE '^\+.*(GEMINI_API_KEY\|HF_TOKEN\|GITHUB_TOKEN\|TELEGRAM_BOT_TOKEN\|OPENCODE_GO_API_KEY)=[A-Za-z0-9_-]{8,}'` | no output, exit non-zero |
 | The gated caveat is documented | `grep -n "gemma-4-31B-it-qat-w4a16-ct" README.md README.en.md` (+ `SECURITY.md` as a bonus) | 2 hits each, plus `SECURITY.md:239` |
-| The built image resolves the CLI and the version | `docker run --rm --entrypoint /bin/sh robotina:local -c 'command -v hf'` and `... -c 'hf --version'` | PENDING: the build is in flight; the recipes are AC14's scenarios 4 |
-| The tokens reach the container under the vendor names | `docker compose exec robotina sh -c 'test -n "$HF_TOKEN" && echo present'` (and the `GEMINI_API_KEY` twin) | PENDING: needs a recreate with the values set. The wiring itself is verified by `git grep -n "ROBOTINA_HF_TOKEN:-" -- compose.yml` and `git grep -n "ROBOTINA_GEMINI_API_KEY:-" -- compose.yml` (both non-empty) |
+| The built image resolves the CLI and the version | `MSYS_NO_PATHCONV=1 docker run --rm --entrypoint /bin/sh robotina:local -c 'command -v hf'` and `... -c 'hf --version'` | `/usr/local/bin/hf` and `2.0.0` (image `sha256:39e9aa79…`, built from this branch; the verifier added the shadow check: `/opt/data/.local/bin` precedes `/usr/local/bin` on `PATH` and carries no `hf`, and `/opt/hf` is not a mount target) |
+| The tokens reach the container under the vendor names | `ROBOTINA_HF_TOKEN=<fake> ROBOTINA_GEMINI_API_KEY=<fake> docker compose run --rm --no-deps --entrypoint /bin/sh robotina -c 'printf %s "$HF_TOKEN" \| sha256sum; printf %s "$GEMINI_API_KEY" \| sha256sum'` | both hashes identical to their host-side references, twice: once by the author and once independently by the verifier with its own fake values. The exact `docker compose exec` form still needs a recreate with real values |
 | The `.env.example` names exist | `git grep -n "ROBOTINA_HF_TOKEN\|ROBOTINA_GEMINI_API_KEY" -- .env.example` | PENDING on T4-bis (owner's hand edit) |
-| Independent read-only verification | `gentle-ai-verify` over `main..HEAD` | PENDING (dispatched after the build) |
+| Independent read-only verification | `gentle-ai-verify` over `main..HEAD` | DONE: 10 claims attacked, 7 not falsified, 3 findings (1 Medium, 2 Low) fixed in this branch — Diagnosis 13 |
 
 ## Pending after this PR
 
