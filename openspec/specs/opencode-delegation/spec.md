@@ -562,13 +562,16 @@ splitting guidance lives in the skill.
 ### Requirement: OD12 — A budget exhaustion names the session and a retry path
 
 When `opencode-delegate` ends a turn because the global budget ran out (exit `4`), it SHALL print, on
-stderr and without changing the exit code, (a) a retry command that resumes that same session
-(`--session SID`) carrying the effective agent, provider, model and timeout, and (b) a bounded
-progress snapshot of what the turn had reached: the `git status` of the session's canonical
+stderr and without changing the exit code, (a) a retry template that re-issues work on that same
+session (`--session SID`) carrying the effective agent, provider, model and timeout, (b) the fact that
+the identical prompt is deduped (A3), so resuming means sending a **follow-up** task, and (c) a
+bounded progress snapshot of what the turn had reached: the `git status` of the session's canonical
 `directory`, the agent's own todo list when it has one, and a truncated last assistant text. It SHALL
-emit a **one-shot** advisory when the elapsed time reaches 80% of the budget, before the abort.
-stdout SHALL stay empty on exit `4`, and every snapshot read SHALL be best-effort: an unreadable
-source MUST NOT change the exit code, the abort, or the already-printed timeout line.
+emit a **one-shot** advisory when the elapsed time reaches 80% of the budget. The advisory is
+time-gated, not exit-4-gated: a turn that crosses 80% and later closes with `finish=stop` keeps the
+advisory on stderr and still exits `0`. stdout SHALL stay empty on exit `4`, and every snapshot read
+SHALL be best-effort: an unreadable source MUST NOT change the exit code, the abort, or the
+already-printed timeout line.
 
 Measured origin (#79): a 12-skill delegation was aborted at the global timeout **after** pushing its
 branch — a productive turn, not a stalled one — and the caller got a single line with no session id
@@ -577,14 +580,15 @@ showed that the endpoint that looks like the natural source for "what did it cha
 `GET /session/{id}/diff`, returns `[]` even after the agent writes a file, so the snapshot reads
 `git status` of the session directory instead.
 
-#### Scenario: The exit-4 message carries the session and the retry command
+#### Scenario: The exit-4 message carries the session and a retry template
 
 - GIVEN the stack is up and a delegation whose turn keeps running
 - WHEN the global budget expires
-- THEN the helper exits `4` and stderr carries the resume command with the session id
+- THEN the helper exits `4` and stderr carries the retry template with the session id and the
+  follow-up operand
 - PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -c 'ROBOTINA_OPENCODE_DELEGATE_TIMEOUT=3 sh -s -- "Run the shell command sleep 40 and then reply with exactly DONE"' < robotina/bin/opencode-delegate`
-  (must exit `4`; stderr must carry `para retomar: opencode-delegate --session ses_`; a missing hint
-  or a non-4 exit is a FAILURE)
+  (must exit `4`; stderr must carry `para retomar: opencode-delegate --session ses_`, a
+  `"<seguimiento>"` operand, and the dedupe note; a missing hint or a non-4 exit is a FAILURE)
 
 #### Scenario: The 80% advisory fires exactly once
 
@@ -599,20 +603,25 @@ showed that the endpoint that looks like the natural source for "what did it cha
 - GIVEN a throwaway git repository with a modified tracked file, used as the session directory
 - WHEN the budget expires
 - THEN stderr lists the `git status` entries and stdout is empty
-- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -c 'd=/tmp/od12.XXXXXX; mkdir -p "$d"; cd "$d"; git init -q; git config user.email od12@robotina.local; git config user.name od12; printf "a\n" > f.txt; git add f.txt; git commit -qm init; printf "a\nb\n" > f.txt; ROBOTINA_OPENCODE_DELEGATE_TIMEOUT=3 sh -s -- --directory "$d" "Run the shell command sleep 40 and then reply with exactly DONE"' < robotina/bin/opencode-delegate`
-  (stderr must carry `git (` and ` M f.txt`; stdout must be 0 bytes; a non-empty stdout is a
-  FAILURE)
-- NOTE: this scenario needs no model edit to be non-vacuous: the dirty file is created before the
-  delegation, so the `git status` entries exist the moment the budget expires.
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -c 'd=$(mktemp -d /tmp/od12.XXXXXX); cd "$d"; git init -q; git config user.email od12@robotina.local; git config user.name od12; printf "a\n" > f.txt; git add f.txt; git commit -qm init; printf "a\nb\n" > f.txt; ROBOTINA_OPENCODE_DELEGATE_TIMEOUT=3 sh -s -- --directory "$d" "Run the shell command sleep 40 and then reply with exactly DONE"; rc=$?; rm -rf "$d"; exit $rc' < robotina/bin/opencode-delegate`
+  (must exit `4`; stderr must carry `git (` and ` M f.txt`; stdout must be 0 bytes; a non-empty
+  stdout is a FAILURE)
+- NOTE: this scenario needs no model edit to be non-vacuous (the dirty file exists before the
+  delegation) and leaves nothing behind: the repository is `mktemp -d` and removed before the outer
+  shell exits, preserving the helper's exit code.
 
-#### Scenario: A healthy turn prints neither the advisory nor the snapshot
+#### Scenario: A turn that closes before 80% prints neither the advisory nor the snapshot
 
-- GIVEN a delegation that closes inside its budget
+- GIVEN a delegation that closes well inside its budget
 - WHEN the helper exits `0`
 - THEN stderr carries neither the advisory nor the snapshot block, and stdout is exactly the answer
-- PROOF: the OD6 30 s proof (exit `0`, prints `DONE`): its stderr MUST NOT match
-  `presupuesto al 80%` or `snapshot del progreso`, and its stdout MUST be exactly `DONE` (this is the
-  non-vacuous control: the new lines exist only on the exit-4 path)
+- PROOF: `MSYS_NO_PATHCONV=1 docker compose exec -T -u hermes robotina sh -c 'sh -s -- --timeout 180 "Reply with exactly OK"' < robotina/bin/opencode-delegate`
+  (must exit `0`; stdout must be exactly `OK`; stderr MUST NOT match `presupuesto al 80%` or
+  `snapshot del progreso`)
+- NOTE: the advisory is time-gated, so this control is non-vacuous only while the turn closes before
+  80% of its budget — a turn that crosses 80% keeps the advisory on stderr even when it later closes
+  with `finish=stop` and exits `0`. The snapshot block, by contrast, exists **only** on the exit-4
+  path.
 
 #### Scenario: The snapshot degrades instead of failing
 
