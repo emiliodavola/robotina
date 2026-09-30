@@ -53,10 +53,33 @@ Branch: `fix/issue-79-delegate-budget-resume`, off `main`. Owner: `emiliodavola`
 - [x] T2 — Helper: resume hint + snapshot + one-shot 80% advisory; header and `usage()` updated.
 - [x] T3 — Spec: OD12 + the #79 purpose note.
 - [x] T4 — Docs: `hermes/skills/opencode-delegation/SKILL.md` and `hermes/context/.hermes.md`.
-- [ ] T5 — Verification: `sh -n`, `--help`, the OD12 proofs (exit `4` carries the hint; the advisory
+- [x] T5 — Verification: `sh -n`, `--help`, the OD12 proofs (exit `4` carries the hint; the advisory
       fires exactly once; stdout clean), `docker compose config -q`; independent read-only verifier
       over the diff and the spec assertions.
 - [ ] T6 — Commit per work unit, push, PR against `main` assigned to the owner.
+
+## Verification (independent, read-only)
+
+`gentle-ai-verify` over `main..HEAD` (2026-09-29): 10/10 checks PASS and no Blocker/High finding. The
+four low findings it raised were fixed in this branch:
+
+- **F1** — the resume hint printed no task operand (verbatim it hit `usage; exit 1`, and the identical
+  prompt was deduped). Fixed: the template now carries a `"<seguimiento>"` operand and a line naming
+  the A3 dedupe; the docs say "re-issue a follow-up task".
+- **F2** — the 80% advisory is time-gated, not exit-4-gated, so a turn that crosses 80% and later
+  closes keeps the advisory. Fixed: OD12, the skill row and `.hermes.md` now say so, and the control
+  scenario is scoped to "closes before 80%".
+- **F3** — the scenario-3 proof used a literal path and leaked it. Fixed: `mktemp -d` plus cleanup
+  preserving the exit code.
+- **F4** — the report call was unguarded under `set -e`. Fixed: `|| true`.
+
+**F5 (not a defect):** the `ultimo texto util` line is code-verified (`.[0:300]`) but was never
+observed in the exit-4 runs, because none of them had a text part in the last assistant message.
+
+Observed proofs after the fixes (stale-image recipe, live server, no rebuild): exit `4` with stdout 0
+bytes, the `--session` template + `"<seguimiento>"` + dedupe note, `presupuesto al 80%` counted exactly
+once, the hermetic dirty-repo proof printing `git (` and ` M f.txt` and leaving nothing behind, and the
+healthy control exiting `0` with stdout `OK` and zero advisory/snapshot lines.
 
 ## Pending after this PR
 
