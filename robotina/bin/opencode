@@ -48,6 +48,21 @@
 #    ROBOTINA_OPENCODE_GO_API_KEY no esta definida, no cambia nada: exec directo
 #    al binario real (passthrough), de modo que degrada en vez de romper.
 #
+# 3) La guarda del default crudo (#78).
+#
+#    `robotina/overlay.json` fija `default_agent: gentle-orchestrator` a
+#    proposito (la TUI abre ahi, commit 3588eef) y ese agente coordina
+#    sub-agentes y NUNCA ejecuta inline. Por eso un `opencode run` sin `--agent`
+#    deja el trabajo sin hacer, en silencio: el turno cierra "bien" sin haber
+#    tocado nada. El camino de delegacion ya manda el agente explicito
+#    (`opencode-delegate` y el CLI con `--agent`); esta guarda cierra el hueco
+#    del CLI crudo y rechaza `run` sin `--agent` ANTES de ejecutar, con un
+#    mensaje accionable, en vez de gastar un turno para nada.
+#
+#    Cubre SOLO `run` (el camino no interactivo). La TUI queda como superficie
+#    humana del coordinador, a proposito; `--help` pasa (no es trabajo); y el
+#    escape hatch es el binario real: /usr/local/bin/opencode.
+#
 # Nunca imprime ni registra la clave. El destino va por ruta absoluta: la
 # resolucion por PATH la hace /opt/robotina/bin, que va primero y es root-owned
 # (mejor que el /opt/data/.local/bin escribible por el agente).
@@ -64,6 +79,36 @@ export HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME
 if [ -n "${ROBOTINA_OPENCODE_GO_API_KEY:-}" ]; then
   OPENCODE_GO_API_KEY="$ROBOTINA_OPENCODE_GO_API_KEY"
   export OPENCODE_GO_API_KEY
+fi
+
+# 3) La guarda del default crudo (#78): ver el bloque 3 del encabezado.
+#
+# El subcomando es el primer argumento que no es una opcion. `--agent` y
+# `--agent=X` cuentan como agente explicito; `-h`/`--help` pasa porque no es
+# trabajo. Todo lo que no sea `run` (TUI, serve, debug, auth, ...) sigue de largo.
+subcommand=""
+for arg in "$@"; do
+  case "$arg" in
+  -*) continue ;;
+  *) subcommand="$arg"; break ;;
+  esac
+done
+
+if [ "$subcommand" = "run" ]; then
+  has_agent=0
+  has_help=0
+  for arg in "$@"; do
+    case "$arg" in
+    --agent | --agent=*) has_agent=1 ;;
+    -h | --help) has_help=1 ;;
+    esac
+  done
+  if [ "$has_agent" -eq 0 ] && [ "$has_help" -eq 0 ]; then
+    echo "opencode: 'run' sin --agent usaria el default_agent mergeado (gentle-orchestrator), que coordina sub-agentes y no ejecuta inline: el trabajo quedaria sin hacer." >&2
+    echo "opencode: nombra el ejecutor, p.ej.: opencode run --agent build -m opencode-go/<model> \"<tarea>\"" >&2
+    echo "opencode: (la TUI interactiva no pasa por esta guarda; escape hatch: /usr/local/bin/opencode)" >&2
+    exit 2
+  fi
 fi
 
 exec /usr/local/bin/opencode "$@"
