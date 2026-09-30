@@ -146,9 +146,10 @@ uso: opencode-delegate [--session SID] [--agent NAME] [--directory PATH]
                      server ACOTADO A LA SESION (GET /session/status?directory=)
                      es la autoridad de liveness.
 
-  exit 4 (presupuesto global agotado) imprime, en stderr, el aviso del 80%, un
-  snapshot acotado del progreso de la sesion y el comando para retomarla con
-  --session. El turno NO se reenvia: retomar es una decision del caller.
+  exit 4 (presupuesto global agotado) imprime, en stderr, un snapshot acotado
+  del progreso de la sesion y una plantilla para reencolar un SEGUIMIENTO en
+  esa sesion con --session (la misma tarea se dedupea, asi que no se reenvia
+  sola). El aviso del 80% sale por tiempo, cierre el turno como cierre.
 EOF
 }
 
@@ -247,7 +248,8 @@ budget_exhaustion_report() {
     [ -n "$text" ] && echo "  ultimo texto util: $text" >&2
   fi
 
-  echo "  para retomar: opencode-delegate --session $SESSION --agent $AGENT --provider $PROVIDER --model $MODEL --timeout $TIMEOUT" >&2
+  echo "  para retomar: opencode-delegate --session $SESSION --agent $AGENT --provider $PROVIDER --model $MODEL --timeout $TIMEOUT \"<seguimiento>\"" >&2
+  echo "  (la misma tarea ya esta en la sesion y se dedupea: mandá un SEGUIMIENTO, p.ej. \"continua desde donde quedaste\")" >&2
 }
 
 # --- parseo de argumentos ---------------------------------------------------
@@ -580,7 +582,7 @@ while :; do
     cleanup_pending_permissions >/dev/null 2>&1 || true
     api -X POST "$BASE/session/$SESSION/abort" >/dev/null 2>&1 || true
     echo "opencode-delegate: timeout global de ${TIMEOUT}s en la session $SESSION (ultimo status: $status_type, alcance: ${SESSION_DIR:-desconocido}); turno abortado" >&2
-    budget_exhaustion_report "$assistant"
+    budget_exhaustion_report "$assistant" || true
     exit 4
   fi
 
