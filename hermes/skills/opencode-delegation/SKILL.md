@@ -77,7 +77,11 @@ helper. A slow turn is never an error.
 `ROBOTINA_OPENCODE_DELEGATE_TIMEOUT`, today 1800 s) and `--interval SEC` changes how often the server
 status is polled (default 2 s). The budget is a ceiling, not a target: a multi-phase task (survey →
 edit → network → git/GitHub) still goes faster and more reliably split into one-phase delegations than
-as one mega-turn.
+as one mega-turn. The helper warns once when the elapsed time reaches 80% of the budget (time-gated:
+the advisory stays even if the turn later closes fine). When the budget actually runs out (exit `4`)
+it also prints, on stderr, a bounded snapshot of what the turn had reached (the session's `git status`,
+its todo list, the last useful text) plus a `--session SID …` template to **re-issue a follow-up task**
+on that session — the identical prompt is deduped (A3), so resuming is your call and means a new text.
 `OPENCODE_BASE_URL` overrides the endpoint (tests point it at a stub);
 `OPENCODE_SERVER_PASSWORD` is picked up when set; `ROBOTINA_OPENCODE_DELEGATE_MODEL` supplies the
 default model, `ROBOTINA_OPENCODE_DELEGATE_AGENT` the default agent, and
@@ -291,7 +295,7 @@ mentions, is how a bug report ends up saying "could not reproduce" (#45).
 | `403` with an HTML body mentioning Squid | The URL host is not in `NO_PROXY`, so the call went through the proxy and the allowlist denied it. Use `127.0.0.1`. |
 | `ProviderModelNotFoundError` (the HTTP layer shows only `{"name":"UnknownError",...,"ref":"err_…"}`) | The provider/model pair is wrong. Read `GET /config/providers` and pick a listed pair; the Go key's provider is `opencode-go`, not `opencode`. The real error text is in the server log. |
 | The blocking call times out (`sequential tool terminal timed out after 420.0s`) | You held `POST /session/{id}/message` open across a long agent loop. Switch to `POST /session/{id}/prompt_async` plus following `GET /session/status?directory=<the session's cwd>` and reading the final message once the turn is over. |
-| A delegation exits `4` on a turn that was making progress | The turn exceeded the global budget. Raise it with `--timeout SEC` or `ROBOTINA_OPENCODE_DELEGATE_TIMEOUT`, and prefer splitting the task: a multi-phase turn rarely fits any single budget. |
+| A delegation exits `4` on a turn that was making progress | The turn exceeded the global budget, so it was **not** stalled. The helper already printed a bounded snapshot of the progress (`git status` of the session tree, todo, last text) and a `--session SID …` template — continue from stderr on that session with a **follow-up task** (the identical prompt is deduped), instead of starting over. Raise the ceiling with `--timeout SEC` or `ROBOTINA_OPENCODE_DELEGATE_TIMEOUT`, and prefer splitting the task: a multi-phase turn rarely fits any single budget. |
 | A delegation reports `exit 3` with `cerro sin mensaje final (finish=null)` on a turn that was fine | The helper in the image predates the scoped-liveness fix (#40): it read the *unscoped* status map, where a session created with `--directory` outside `/workspace` never appears, and turned that absence into a closure. Compare `md5sum /opt/robotina/bin/opencode-delegate` with `git show HEAD:robotina/bin/opencode-delegate | md5sum`: if the image's copy is the old one, the fix needs a rebuild plus `--force-recreate`, not another retry. |
 | A session stalls: its last part is a `reasoning` part and `info.finish` stays `null` | The turn never converged. If you delegated with `opencode-delegate` it reports the pending permission (`exit 2`, aborted), is bounded by the global timeout (`exit 4`), or exits `5` if something else aborted the session — it no longer guesses from frozen tokens. Otherwise inspect it and abort (`POST /session/{id}/abort`); do **not** report a result you never got, and **never** resend the same prompt: check `GET /session/{id}/message` first. |
 | `MCP error -32000: Connection closed` on an MCP server | That server's process died at startup. For local ones, run its command by hand inside the container to see the real error. |

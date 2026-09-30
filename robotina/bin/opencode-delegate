@@ -42,6 +42,16 @@
 #       ejecuta inline. Por eso `prompt_async` manda `"agent"` explicito
 #       (--agent, default `build`): el default mergeado nunca decide.
 #
+#   #79) Agotar el presupuesto NO puede ser un callejon sin salida. Medido
+#       (2026-09-29): un turno de 12 skills fue abortado por el timeout global
+#       DESPUES de pushear su rama, y el helper no dijo ni en que sesion habia
+#       corrido ni que habia alcanzado a hacer. Ahora la salida 4 imprime, en
+#       stderr, un snapshot acotado del progreso (`git status` del arbol de la
+#       sesion, todo del agente, ultimo texto util) y el comando exacto para
+#       retomar con `--session`; ademas se avisa UNA vez al 80% del presupuesto.
+#       Todo best-effort: una lectura ilegible nunca cambia el exit 4 ni ensucia
+#       el stdout.
+#
 # Contrato:
 #   opencode-delegate [--session SID] [--agent NAME] [--directory PATH]
 #                     [--provider ID] [--model ID] [--stall-polls N]
@@ -135,6 +145,11 @@ uso: opencode-delegate [--session SID] [--agent NAME] [--directory PATH]
   --stall-polls N    DEPRECADO: ya no afecta el comportamiento; el estado del
                      server ACOTADO A LA SESION (GET /session/status?directory=)
                      es la autoridad de liveness.
+
+  exit 4 (presupuesto global agotado) imprime, en stderr, un snapshot acotado
+  del progreso de la sesion y una plantilla para reencolar un SEGUIMIENTO en
+  esa sesion con --session (la misma tarea se dedupea, asi que no se reenvia
+  sola). El aviso del 80% sale por tiempo, cierre el turno como cierre.
 EOF
 }
 
@@ -196,6 +211,47 @@ last_user_text() {
          | join("")'
 }
 
+# Snapshot acotado del progreso de la sesion + comando de retoma (#79). Se
+# llama SOLO en la salida por presupuesto. Es best-effort de punta a punta: una
+# lectura ilegible solo OMITE su linea; nunca cambia el exit 4 ni escribe en
+# stdout. `$1` es el JSON del ultimo mensaje `assistant` ya parseado por el
+# polling (`{}` si no hubo ninguno).
+budget_exhaustion_report() {
+  last_assistant="$1"
+
+  echo "opencode-delegate: snapshot del progreso antes del abort (best-effort):" >&2
+
+  # Progreso REAL del arbol de la sesion: `git status` del `directory` canonico.
+  # Se midio (2026-09-29) que `GET /session/{id}/diff` devuelve `[]` aunque el
+  # agente haya editado un archivo, asi que no se usa como fuente de progreso.
+  if [ -n "$SESSION_DIR" ] && [ -d "$SESSION_DIR" ] &&
+    git -C "$SESSION_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    changed="$(git -C "$SESSION_DIR" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+    shortstat="$(git -C "$SESSION_DIR" diff --shortstat 2>/dev/null | sed 's/^ *//' || true)"
+    echo "  git ($SESSION_DIR): ${changed:-0} entrada(s) en status${shortstat:+; $shortstat}" >&2
+    git -C "$SESSION_DIR" status --porcelain 2>/dev/null | head -5 | while IFS= read -r line; do
+      echo "    $line" >&2
+    done
+  fi
+
+  # todo: `Todo[]` = {content, status, priority}
+  todos="$(api -f "$BASE/session/$SESSION/todo" 2>/dev/null || true)"
+  if [ -n "$todos" ] && printf '%s' "$todos" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    pend="$(printf '%s' "$todos" | jq -r '[.[] | select((.status // "") != "completed" and (.status // "") != "cancelled")] | length' 2>/dev/null || true)"
+    total="$(printf '%s' "$todos" | jq -r 'length' 2>/dev/null || true)"
+    echo "  todo: ${pend:-?} sin cerrar de ${total:-?}" >&2
+  fi
+
+  if [ -n "$last_assistant" ] && [ "$last_assistant" != "{}" ]; then
+    text="$(printf '%s' "$last_assistant" | jq -r '
+      (.parts // []) | map(select(.type == "text") | (.text // "")) | join(" ") | .[0:300]' 2>/dev/null || true)"
+    [ -n "$text" ] && echo "  ultimo texto util: $text" >&2
+  fi
+
+  echo "  para retomar: opencode-delegate --session $SESSION --agent $AGENT --provider $PROVIDER --model $MODEL --timeout $TIMEOUT \"<seguimiento>\"" >&2
+  echo "  (la misma tarea ya esta en la sesion y se dedupea: mandá un SEGUIMIENTO, p.ej. \"continua desde donde quedaste\")" >&2
+}
+
 # --- parseo de argumentos ---------------------------------------------------
 stall_polls_set=0
 while [ $# -gt 0 ]; do
@@ -252,6 +308,12 @@ fi
 case "$TIMEOUT" in '' | *[!0-9]*) echo "opencode-delegate: --timeout invalido: $TIMEOUT" >&2; exit 1 ;; esac
 [ "$TIMEOUT" -ge 1 ] || { echo "opencode-delegate: --timeout invalido: $TIMEOUT (se espera un entero positivo)" >&2; exit 1; }
 case "$INTERVAL" in '' | *[!0-9.]*) echo "opencode-delegate: --interval invalido: $INTERVAL" >&2; exit 1 ;; esac
+
+# Aviso al 80% del presupuesto (#79): una sola vez, informativo. Con
+# presupuestos chicos el umbral se clampea a 1s para no dispararse en el primer
+# poll. No cambia ningun exit code.
+ADVISORY_AT=$((TIMEOUT * 80 / 100))
+[ "$ADVISORY_AT" -ge 1 ] || ADVISORY_AT=1
 
 # `gentle-orchestrator` coordina sub-agentes y no ejecuta inline: el turno puede
 # no converger. Se avisa, pero NO se rechaza: la escape hatch queda (un caller
@@ -356,6 +418,8 @@ api -f -X POST "$BASE/session/$SESSION/prompt_async" \
 # --- polling: liveness del server + decision terminal del mensaje -----------
 start_epoch="$(date +%s)"
 settle_count=0
+advisory_shown=0
+assistant="{}"
 
 while :; do
   # Estado del turno segun el server, ACOTADO A LA INSTANCIA QUE ES DUENA DE LA
@@ -499,15 +563,26 @@ while :; do
     fi
   fi
 
+  elapsed=$(( $(date +%s) - start_epoch ))
+
+  # Aviso al 80% (#79): una sola vez, informativo. Va ANTES del corte por
+  # presupuesto para que un presupuesto chico (donde el 80% y el 100% caen en el
+  # mismo poll) igual deje ver el aviso. No cambia ningun exit code.
+  if [ "$advisory_shown" = 0 ] && [ "$elapsed" -ge "$ADVISORY_AT" ]; then
+    echo "opencode-delegate: aviso: presupuesto al 80% (${elapsed}s de ${TIMEOUT}s) en la session $SESSION; si el turno no cierra, retomalo con --session $SESSION" >&2
+    advisory_shown=1
+  fi
+
   # Timeout global: se agoto el presupuesto sin que el turno cierre. Antes de
   # abortar se corre el MISMO cleanup de permissions pendientes que la salida de
   # bloqueo nombrado: el abort no limpia el request (medido), asi que sin esto el
   # helper deja requests listados en el server. El cleanup es best-effort y un
   # fallo suyo NO cambia el exit 4.
-  if [ "$(($(date +%s) - start_epoch))" -ge "$TIMEOUT" ]; then
+  if [ "$elapsed" -ge "$TIMEOUT" ]; then
     cleanup_pending_permissions >/dev/null 2>&1 || true
-    echo "opencode-delegate: timeout global de ${TIMEOUT}s en la session $SESSION (ultimo status: $status_type, alcance: ${SESSION_DIR:-desconocido}); turno abortado" >&2
     api -X POST "$BASE/session/$SESSION/abort" >/dev/null 2>&1 || true
+    echo "opencode-delegate: timeout global de ${TIMEOUT}s en la session $SESSION (ultimo status: $status_type, alcance: ${SESSION_DIR:-desconocido}); turno abortado" >&2
+    budget_exhaustion_report "$assistant" || true
     exit 4
   fi
 
