@@ -67,7 +67,7 @@ Branch: `fix/issue-87-gated-claim-and-aistudiocdn`, off `main`. Owner: `emilioda
 - [x] T4 — Contract: `openspec/specs/agent-credentials/spec.md` CR11. Same commits.
 - [x] T5 — Verification: the recipes of both axes, plus `gentle-ai-verify` over `main..HEAD`. Done; its
       findings are recorded below and fixed in the follow-up commit.
-- [ ] T6 — Push and PR against `main` (`Closes #87`), assigned to `emiliodavola`.
+- [x] T6 — Push and PR against `main` (`Closes #87`), assigned to `emiliodavola`: **PR #88**.
 
 ## What the independent verifier found (and what was done about it)
 
