@@ -50,9 +50,9 @@ Branch: `fix/issue-79-delegate-budget-resume`, off `main`. Owner: `emiliodavola`
 ## Tasks
 
 - [x] T1 — Branch and this tracker.
-- [ ] T2 — Helper: resume hint + snapshot + one-shot 80% advisory; header and `usage()` updated.
-- [ ] T3 — Spec: OD12 + the #79 purpose note.
-- [ ] T4 — Docs: `hermes/skills/opencode-delegation/SKILL.md` and `hermes/context/.hermes.md`.
+- [x] T2 — Helper: resume hint + snapshot + one-shot 80% advisory; header and `usage()` updated.
+- [x] T3 — Spec: OD12 + the #79 purpose note.
+- [x] T4 — Docs: `hermes/skills/opencode-delegation/SKILL.md` and `hermes/context/.hermes.md`.
 - [ ] T5 — Verification: `sh -n`, `--help`, the OD12 proofs (exit `4` carries the hint; the advisory
       fires exactly once; stdout clean), `docker compose config -q`; independent read-only verifier
       over the diff and the spec assertions.
