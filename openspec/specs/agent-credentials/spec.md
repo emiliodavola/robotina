@@ -434,3 +434,164 @@ OpenCode Go key as configured while the runtime could not find it.
   `grep -E '^KEYS=' robotina/s6/cont-init.d/50-robotina-profile-env | grep -c 'TELEGRAM_BOT_TOKEN'`
   (must be `0`; the header prose mentions the token deliberately, so the assertion names the set,
   not the file)
+
+### Requirement: CR11 — The Hugging Face token reaches the container under the name the client reads
+
+`.env` SHALL accept an optional `ROBOTINA_HF_TOKEN` with an empty default, and the `robotina` service
+SHALL publish it to the container as `HF_TOKEN` — the name `huggingface_hub` reads, so neither `hf auth
+login` nor a credentials file is involved. The host-facing name carries the `ROBOTINA_` prefix, the rule
+every host-facing key here follows (CR1). The default SHALL be written with the `:-` form, because that is
+what keeps the credential optional: an unset token leaves the CLI anonymous and the Hub answers 401/403 at
+the moment of use, which is a read failure the agent reports, not a boot failure. `ROBOTINA_HF_TOKEN` SHALL
+be documented in `.env.example` with no value, next to the GitHub PAT.
+
+The token is only half of the gate. `google/gemma-4-31B-it-qat-w4a16-ct` is a **gated** repository: its
+licence has to be accepted on huggingface.co with the token's account, and that acceptance is a human step
+outside this repository. The documentation SHALL record the caveat where the credential is described; the
+stack SHALL NOT claim to perform it.
+
+#### Scenario: Both names exist and are independently settable
+
+- GIVEN the change is applied
+- WHEN the two files are searched for the two names
+- THEN `ROBOTINA_HF_TOKEN` appears in `.env.example` and `HF_TOKEN` appears in `compose.yml`, with no
+  literal value in either
+- PROOF: `git grep -n "ROBOTINA_HF_TOKEN\|HF_TOKEN" -- .env.example compose.yml`
+  (both names present in the expected files, no value after either)
+- NOTE: the `.env.example` half of this recipe is PENDING on a hand edit the repository owner is making on
+  this same branch — measured before that edit, `compose.yml:166` carries
+  `HF_TOKEN: ${ROBOTINA_HF_TOKEN:-}` while `.env.example` still has no `ROBOTINA_HF_TOKEN=` line. The
+  recipe is written for the merged state and is not runnable until the edit lands.
+
+#### Scenario: The empty default is what keeps the start unconditional
+
+- GIVEN the `robotina` service's environment
+- WHEN the published token's default is read
+- THEN it is the `:-` empty default
+- PROOF: `git grep -n "ROBOTINA_HF_TOKEN:-" -- compose.yml`
+  (non-empty)
+- NOTE: a `${ROBOTINA_HF_TOKEN:?…}` form would be a FAILURE: `:?` makes compose refuse to start without
+  the variable, turning an optional credential into a mandatory one. The recipe names the `:-` substring
+  rather than the whole `HF_TOKEN: ${ROBOTINA_HF_TOKEN:-}` line because the braces of the full form are an
+  escaping trap in the BRE that `git grep` uses.
+
+#### Scenario: The container sees the vendor name with the token's value
+
+- GIVEN the stack was recreated with `ROBOTINA_HF_TOKEN` set
+- WHEN the container's environment is probed for the vendor name
+- THEN `HF_TOKEN` is non-empty, and the probe prints a word instead of the value
+- PROOF: `docker compose exec robotina sh -c 'test -n "$HF_TOKEN" && echo present'`
+  (must print `present`; short-circuiting on `test -n` is what keeps the value out of the terminal and out
+  of any log)
+- NOTE: this needs the stack recreated with the token set, so it is not runnable before a rebuild plus
+  `--force-recreate`. The recipe never prints the value on purpose: the token is readable with a bounded
+  `docker inspect`, and echoing it would put a live credential in the transcript.
+
+#### Scenario: No secret value is committed by this change
+
+- GIVEN the change's commits
+- WHEN the added lines are searched for a credential written with a value
+- THEN no line assigns a token-like value
+- PROOF:
+  `git diff main...HEAD | grep -nE '^\+.*(HF_TOKEN|GITHUB_TOKEN|TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY)=[A-Za-z0-9_-]{8,}'`
+  (no output, exit non-zero)
+- NOTE: this recipe is deliberately **change-set scoped**. CR4's repo-wide
+  `…(TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY|GITHUB_TOKEN)=.+` matches value-less documentation
+  placeholders such as `ROBOTINA_GITHUB_TOKEN=      # comment`, so it reports hits on `main` today
+  (measured: 7 hits); that over-broad class is already recorded at
+  `odd/tasks/single-robotina-container.md:501-506`. CR4 is NOT changed by this requirement — this recipe
+  exists so that a change can prove its own cleanliness without waiting on that repair.
+
+#### Scenario: The gated caveat is documented
+
+- GIVEN the change is applied
+- WHEN both READMEs are searched for the gated model
+- THEN both name it
+- PROOF: `grep -n "gemma-4-31B-it-qat-w4a16-ct" README.md README.en.md`
+  (non-empty in both; measured: 2 hits in each)
+- NOTE: `README.md:342` and `README.en.md:353` state that the token's account has to have accepted the
+  licence on huggingface.co, and each README also carries the read-only probe
+  `docker compose exec robotina hf download google/gemma-4-31B-it-qat-w4a16-ct --dry-run` — which is why
+  the assertion names the model id rather than the word "gated".
+
+### Requirement: CR12 — The Google AI Studio key reaches the container under the name AI Studio documents
+
+`.env` SHALL accept an optional `ROBOTINA_GEMINI_API_KEY` with an empty default, and the `robotina` service
+SHALL publish it to the container as `GEMINI_API_KEY` — the vendor name AI Studio documents for the Gemini
+Developer API path — written with the `:-` form so that an unset key never changes container start
+behaviour. `ROBOTINA_GEMINI_API_KEY` SHALL be documented in `.env.example` with no value.
+
+Exactly **one** alias SHALL be published. Google's own page for the Gemini API key
+(https://ai.google.dev/gemini-api/docs/api-key) says to "Set the environment variable `GEMINI_API_KEY` or
+`GOOGLE_API_KEY`", that the client libraries "automatically detect and use these variables", and that "If
+both are set, `GOOGLE_API_KEY` takes precedence". The SDK implements that precedence literally —
+`google/genai/_api_client.py` reads `GOOGLE_API_KEY` first and warns when both are present — and the same
+page recommends setting only one. A second alias of the same value would hand the SDK a name the stack
+never chose, and that name would silently win. A tool that expects `GOOGLE_API_KEY` SHALL alias it itself.
+
+The key's egress is already covered: the generation API falls under the existing `.googleapis.com` entry in
+`squid/allowlist.txt`, so a subdomain SHALL NOT be re-listed per endpoint.
+
+Measured (2026-09-30): `compose.yml` publishes `GEMINI_API_KEY: ${ROBOTINA_GEMINI_API_KEY:-}` on the
+`robotina` service, while `.env.example` does not carry the host-facing name yet — the repository owner is
+adding it by hand on this branch, so the scenarios that name `.env.example` below are written for that
+merged state.
+
+#### Scenario: Both names exist and are documented, with no value
+
+- GIVEN the change is applied
+- WHEN the two files are searched for the two names
+- THEN `ROBOTINA_GEMINI_API_KEY` appears in `.env.example` and `GEMINI_API_KEY` appears in `compose.yml`,
+  with no literal value in either
+- PROOF: `git grep -n "ROBOTINA_GEMINI_API_KEY\|GEMINI_API_KEY" -- .env.example compose.yml`
+  (both names present in the expected files, no value after either)
+- NOTE: the `.env.example` half is PENDING on the same hand edit — measured before it, `compose.yml:175`
+  carries `GEMINI_API_KEY: ${ROBOTINA_GEMINI_API_KEY:-}` while `.env.example` still has no
+  `ROBOTINA_GEMINI_API_KEY=` line. The other hit the recipe returns today, `compose.yml:169`, is the
+  explanatory comment and not a published name — the mapping form is what the next scenario asserts.
+  Written for the merged state; not runnable until the edit lands.
+
+#### Scenario: The empty default keeps the start unconditional
+
+- GIVEN the `robotina` service's environment
+- WHEN the published key's default is read
+- THEN it is the `:-` empty default
+- PROOF: `git grep -n "ROBOTINA_GEMINI_API_KEY:-" -- compose.yml`
+  (non-empty)
+- NOTE: as in CR11, a `${ROBOTINA_GEMINI_API_KEY:?…}` form would be a FAILURE: `:?` makes compose refuse
+  to start without the variable and turns an optional credential into a mandatory one.
+
+#### Scenario: Exactly one alias is published, so Google's precedence rule cannot bite
+
+- GIVEN the change is applied
+- WHEN the environment mappings are searched for the second alias
+- THEN `GOOGLE_API_KEY` is published nowhere
+- PROOF: `git grep -nE '^[[:space:]]*GOOGLE_API_KEY:' -- compose.yml robotina/`
+  (no output, exit non-zero — no mapping publishes it)
+- NOTE: the pattern names the **mapping form**, not the word, deliberately: `compose.yml:169` mentions
+  `GOOGLE_API_KEY` in the comment that explains this very rule, so the bare
+  `git grep -n "GOOGLE_API_KEY" -- compose.yml robotina/` returns that comment — measured. A proof that
+  matches the prose is not a proof, the same convention AC12's last scenario and CR9's last scenario
+  record. Publishing both aliases would give the SDK a second name for the same value and that name would
+  win, with a warning.
+
+#### Scenario: The container sees the vendor name with the key's value
+
+- GIVEN the stack was recreated with `ROBOTINA_GEMINI_API_KEY` set
+- WHEN the container's environment is probed for the vendor name
+- THEN `GEMINI_API_KEY` is non-empty, and the probe prints a word instead of the value
+- PROOF: `docker compose exec robotina sh -c 'test -n "$GEMINI_API_KEY" && echo present'`
+  (must print `present`; short-circuiting on `test -n` keeps the key out of the terminal and out of any log)
+- NOTE: needs the stack recreated with the key set, so it is not runnable before a rebuild plus
+  `--force-recreate`.
+
+#### Scenario: No secret value is committed by this change
+
+- GIVEN the change's commits
+- WHEN the added lines are searched for a credential written with a value
+- THEN no line assigns a token- or key-like value
+- PROOF:
+  `git diff main...HEAD | grep -nE '^\+.*(GEMINI_API_KEY|HF_TOKEN|GITHUB_TOKEN|TELEGRAM_BOT_TOKEN|OPENCODE_GO_API_KEY)=[A-Za-z0-9_-]{8,}'`
+  (no output, exit non-zero)
+- NOTE: the same change-set-scoped recipe as CR11's, extended with `GEMINI_API_KEY`. The same caveat about
+  CR4's over-broad repo-wide form applies, and CR4 is not changed by this requirement.

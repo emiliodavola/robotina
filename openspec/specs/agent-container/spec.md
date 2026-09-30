@@ -580,3 +580,89 @@ loud, not patching the updater.
 - NOTE: the fixture is created and removed inside the same command, so no shadowing copy survives the
   proof, and the absolute-path version check still passes — it is the `PATH` assertion that catches the
   shadow, exactly as in AC11.
+
+### Requirement: AC14 — The hf CLI is baked from a pinned PyPI ARG and resolves from the image
+
+The image SHALL bake the Hugging Face `hf` CLI, versioned by a single `ARG HUGGINGFACE_HUB_VERSION` that is
+the only source of that version — the `AGENTS.md` rule: a tool baked from a release or an npm asset is
+versioned by its `ARG`, and "which version runs" is answered from the repository and from the image. The
+CLI SHALL be installed from the PyPI package `huggingface_hub` — not from the `hf` package: the pin is the
+library's and a single pin covers both — into an image-only venv under `/opt/hf`, with the executable
+linked into `/usr/local/bin`. The build SHALL fail when the installed CLI does not report the pinned
+version, so a wrong pin fails the BUILD instead of a later probe.
+
+`hf` SHALL NOT publish a `ROBOTINA_*_VERSION` variable and SHALL NOT get a healthcheck arm, so AC13's
+published-pin scope stays exactly `engram` and `gentle-ai`.
+
+Measured: the step runs `uv venv --python 3.13 /opt/hf`, `uv pip install --python /opt/hf/bin/python
+"huggingface_hub==${HUGGINGFACE_HUB_VERSION}"`, `ln -sf /opt/hf/bin/hf /usr/local/bin/hf`, then
+`hf --version | grep -F "${HUGGINGFACE_HUB_VERSION}"`. The version output goes to stdout and the `hf-cli`
+skill's advice to stderr, so the assertion reads stdout on purpose: the warning cannot satisfy it.
+
+NOTE: the reason this is a venv and not `uv tool install` is that `UV_TOOL_DIR` and `UV_TOOL_BIN_DIR` point
+inside the `/opt/data` host bind (`/opt/data/.local/share/uv-tools` and `/opt/data/.local/bin`), so anything
+baked there is shadowed at mount time and lost. `/opt/hf` is an image path that no mount covers, and the
+interpreter it links is the uv-managed CPython whose native volume is seeded from the image, so the link
+stays valid at runtime. This is the fact that keeps a future reader from "simplifying" the install step.
+
+#### Scenario: The pin exists and is the Dockerfile's
+
+- GIVEN the change is applied
+- WHEN the Dockerfile is searched for the pin
+- THEN the `ARG` is declared there, and nowhere else may pin it
+- PROOF: `git grep -n '^ARG HUGGINGFACE_HUB_VERSION=' -- robotina/Dockerfile`
+  (non-empty; measured `robotina/Dockerfile:80:ARG HUGGINGFACE_HUB_VERSION=2.0.0`, consumed at :274 and
+  asserted at :276)
+- NOTE: the `pypi` catalog row in `scripts/bump-tools.sh` names that `ARG`
+  (`huggingface-hub pypi huggingface_hub HUGGINGFACE_HUB_VERSION`); it carries no version of its own, which
+  is what makes the `ARG` the single source.
+
+#### Scenario: The pin has a supported update path
+
+- GIVEN the same pin
+- WHEN the repository's bump tool checks its catalog
+- THEN it prints a row for the package whose version column is the pin, and never `sin ARG` nor
+  `no se pudo consultar`
+- PROOF: `scripts/bump-tools.sh --check | grep huggingface-hub`
+  (measured: `huggingface-hub 2.0.0      al dia`)
+- NOTE: the update path is `scripts/bump-tools.sh --write huggingface-hub` plus a rebuild, which is the
+  supported path for this repository's `ARG`-pinned tools — the baked copy is image content and cannot be
+  updated from inside the container.
+
+#### Scenario: The venv path is an image path and not a mount target
+
+- GIVEN the change is applied
+- WHEN the Dockerfile and the compose service definition are searched for the path
+- THEN the Dockerfile uses `/opt/hf`, and no bind mount targets it
+- PROOF: `MSYS_NO_PATHCONV=1 git grep -n '/opt/hf' -- robotina/Dockerfile` (non-empty) together with
+  `git grep -n 'target: /opt/hf' -- compose.yml` (no output, exit non-zero)
+- NOTE: the `MSYS_NO_PATHCONV=1` prefix is required on Windows Git Bash, where an argument starting with `/`
+  is path-converted by MSYS before `git grep` sees it: measured, the bare
+  `git grep -n '/opt/hf' -- robotina/Dockerfile` prints nothing and exits 1 while the Dockerfile carries
+  five matches (lines 262, 264, 273, 274, 275). The empty output is the shell, not a missing pin. On a
+  POSIX shell the prefix is inert.
+
+#### Scenario: The built image resolves the CLI from the image and the build asserts the pin
+
+- GIVEN an image rebuilt from this change
+- WHEN the CLI is resolved and versioned
+- THEN it resolves to the image's own copy and reports the pin
+- PROOF: `docker run --rm --entrypoint /bin/sh robotina:local -c 'command -v hf'`
+  (must print `/usr/local/bin/hf`) together with
+  `docker run --rm --entrypoint /bin/sh robotina:local -c 'hf --version'`
+  (must print the pinned version)
+- NOTE: both need an image rebuilt from this change — the image running today has no `hf`. The recipe inside
+  the Dockerfile itself (`hf --version | grep -F "${HUGGINGFACE_HUB_VERSION}"`) is what makes a wrong pin
+  fail the BUILD instead of a probe, so a green probe against a stale image proves nothing.
+
+#### Scenario: No published pin was added
+
+- GIVEN the change is applied
+- WHEN the image directory and the compose definition are searched for a published `hf` pin
+- THEN none exists
+- PROOF: `git grep -n 'ROBOTINA_HF_VERSION' -- robotina/ compose.yml`
+  (no output, exit non-zero)
+- NOTE: this is what keeps AC13's published-pin scope exactly `engram` and `gentle-ai`: the Dockerfile still
+  carries exactly two `ENV ROBOTINA_*_VERSION` lines (measured: `ENGRAM`, `GENTLE_AI`) and
+  `robotina/healthcheck.sh` has no `hf` arm (measured). AC13 is NOT edited by this requirement, and AC14
+  SHALL NOT be read as extending that invariant to `hf`.
